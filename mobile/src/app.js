@@ -25,10 +25,13 @@ let chats = {};
 let messages = {};
 let peerUsernames = {};
 
-// Public relay servers for WebRTC signaling
-const RELAY_SERVERS = [
-  '/dns4/relay.p2pchat.example.com/tcp/443/wss/p2p-circuit',
-  // Add more relay servers as fallbacks
+// Public WebSocket bootstrap servers for initial connection
+// These are free public libp2p nodes
+const BOOTSTRAP_SERVERS = [
+  // Use WebSocket connections to public IPFS bootstrap nodes
+  '/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN',
+  '/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa',
+  '/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb'
 ];
 
 // Initialize the app
