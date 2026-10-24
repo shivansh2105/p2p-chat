@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#1a1a2e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>P2P Chat</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Setup Screen -->
+    <div id="setup-screen" class="screen active">
+      <div class="setup-container">
+        <div class="logo">
+          <svg viewBox="0 0 100 100" width="80" height="80">
+            <defs>
+              <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:#667eea"/>
+                <stop offset="100%" style="stop-color:#764ba2"/>
+              </linearGradient>
+            </defs>
+            <circle cx="50" cy="50" r="45" fill="url(#grad)"/>
+            <path d="M30 35 Q30 25 40 25 L60 25 Q70 25 70 35 L70 50 Q70 60 60 60 L45 60 L35 70 L35 60 L40 60 Q30 60 30 50 Z" fill="white"/>
+          </svg>
+        </div>
+        <h1>P2P Chat</h1>
+        <p class="subtitle">Decentralized • Private • Serverless</p>
+        
+        <div class="input-group">
+          <label>Your Username</label>
+          <input type="text" id="username-input" placeholder="Enter your name" maxlength="30">
+        </div>
+        
+        <button id="start-btn" class="primary-btn">Start Chatting</button>
+        
+        <p class="info-text">
+          🔒 End-to-end encrypted<br>
+          🌐 No servers needed<br>
+          📱 Works peer-to-peer
+        </p>
+      </div>
+    </div>
+
+    <!-- Main Chat Screen -->
+    <div id="main-screen" class="screen">
+      <!-- Chat List View -->
+      <div id="chat-list-view" class="view active">
+        <header class="app-header">
+          <h1>P2P Chat</h1>
+          <div class="header-actions">
+            <button id="new-chat-btn" class="icon-btn">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+                <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+              </svg>
+            </button>
+            <button id="settings-btn" class="icon-btn">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+                <path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+              </svg>
+            </button>
+          </div>
+        </header>
+        
+        <div id="peer-status" class="peer-status">
+          <span class="status-dot"></span>
+          <span id="peer-count">Looking for peers...</span>
+        </div>
+        
+        <div id="chat-list" class="chat-list">
+          <div class="empty-state">
+            <p>No chats yet</p>
+            <p class="hint">Tap + to connect with someone</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat View -->
+      <div id="chat-view" class="view">
+        <header class="chat-header">
+          <button id="back-btn" class="icon-btn">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+              <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
+            </svg>
+          </button>
+          <div class="chat-info">
+            <h2 id="chat-name">Chat</h2>
+            <span id="chat-status" class="chat-status">connecting...</span>
+          </div>
+        </header>
+        
+        <div id="messages" class="messages"></div>
+        
+        <div class="message-input-container">
+          <input type="text" id="message-input" placeholder="Type a message...">
+          <button id="send-btn" class="send-btn">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- New Chat Modal -->
+    <div id="new-chat-modal" class="modal">
+      <div class="modal-content">
+        <h2>Connect to Peer</h2>
+        
+        <div class="tabs">
+          <button class="tab active" data-tab="address">Enter Address</button>
+          <button class="tab" data-tab="nearby">Nearby</button>
+        </div>
+        
+        <div id="address-tab" class="tab-content active">
+          <div class="input-group">
+            <label>Peer Address</label>
+            <textarea id="peer-address-input" placeholder="Paste peer's multiaddress here..."></textarea>
+          </div>
+          <button id="connect-peer-btn" class="primary-btn">Connect</button>
+        </div>
+        
+        <div id="nearby-tab" class="tab-content">
+          <div id="nearby-peers" class="nearby-peers">
+            <p class="scanning">Scanning for nearby peers...</p>
+          </div>
+        </div>
+        
+        <div class="share-section">
+          <p>Your Address:</p>
+          <div id="my-address" class="my-address">Initializing...</div>
+          <button id="copy-address-btn" class="secondary-btn">Copy Address</button>
+        </div>
+        
+        <button class="close-modal-btn" onclick="closeModal()">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal">
+      <div class="modal-content">
+        <h2>Settings</h2>
+        
+        <div class="input-group">
+          <label>Username</label>
+          <input type="text" id="settings-username" placeholder="Your name">
+        </div>
+        
+        <div class="setting-item">
+          <span>Notifications</span>
+          <label class="toggle">
+            <input type="checkbox" id="notifications-toggle" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+        
+        <div class="setting-item">
+          <span>Auto-backup</span>
+          <label class="toggle">
+            <input type="checkbox" id="backup-toggle">
+            <span class="slider"></span>
+          </label>
+        </div>
+        
+        <div class="peer-id-display">
+          <label>Your Peer ID</label>
+          <code id="my-peer-id">Loading...</code>
+        </div>
+        
+        <button id="save-settings-btn" class="primary-btn">Save</button>
+        <button class="close-modal-btn" onclick="closeModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

@@ -42,12 +42,24 @@ A Telegram-like chat application that works **completely serverless** using peer
 ## ✨ Features
 
 - **🔒 Fully Decentralized** - No central servers, peers connect directly
-- **💾 Local Storage** - All chats stored on your device (SQLite)
+- **💾 Local Storage** - All chats stored on your device
 - **☁️ Google Drive Backup** - WhatsApp-style encrypted cloud backup
 - **🔍 Auto-Discovery** - Find friends on same WiFi automatically
 - **📱 Telegram-style UI** - Beautiful, familiar interface
 - **🔐 End-to-End Encryption** - Messages encrypted in transit
 - **🌍 Works Over Internet** - Connect to anyone, anywhere
+- **📲 Cross-Platform** - Windows, Mac, Linux, Android, iOS
+
+## 📥 Download
+
+| Platform | Download |
+|----------|----------|
+| Windows | [Download .exe](https://github.com/shivansh2105/p2p-chat/releases/latest) |
+| macOS | [Download .dmg](https://github.com/shivansh2105/p2p-chat/releases/latest) |
+| Linux | [Download .AppImage](https://github.com/shivansh2105/p2p-chat/releases/latest) |
+| Android | [Download .apk](https://github.com/shivansh2105/p2p-chat/actions) (from Actions artifacts) |
+
+Or build from source (see below).
 
 ## 🚀 Quick Start
 
@@ -160,6 +172,35 @@ const BOOTSTRAP_NODES = [
 - **better-sqlite3** - Fast local database
 - **Google APIs** - Drive backup
 - **WebRTC** - NAT traversal
+
+## 📱 Mobile App
+
+### Android Build
+
+```bash
+cd mobile
+npm install
+npm run build
+npx cap add android
+npx cap sync android
+npx cap open android  # Opens in Android Studio
+```
+
+Then build APK from Android Studio, or run:
+```bash
+cd android && ./gradlew assembleDebug
+```
+
+### iOS Build (requires macOS)
+
+```bash
+cd mobile
+npm install
+npm run build
+npx cap add ios
+npx cap sync ios
+npx cap open ios  # Opens in Xcode
+```
 
 ## 📜 License
 

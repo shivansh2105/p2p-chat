@@ -1,0 +1,19 @@
+{
+  "appId": "com.p2pchat.app",
+  "appName": "P2P Chat",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 2000,
+      "backgroundColor": "#1a1a2e",
+      "showSpinner": false
+    },
+    "StatusBar": {
+      "style": "dark",
+      "backgroundColor": "#1a1a2e"
+    }
+  }
+}
