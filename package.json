@@ -1,0 +1,45 @@
+{
+  "name": "p2p-chat",
+  "version": "1.0.0",
+  "description": "Decentralized P2P chat app like Telegram with torrent-style networking",
+  "main": "src/main/main.js",
+  "author": "P2P Chat Community",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win --x64",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux"
+  },
+  "build": {
+    "appId": "com.p2pchat.app",
+    "productName": "P2P Chat",
+    "directories": {"output": "dist"},
+    "files": ["src/**/*", "package.json"],
+    "win": {"target": ["portable"], "icon": "assets/icon.png"},
+    "mac": {"target": ["zip"], "icon": "assets/icon.png"},
+    "linux": {"target": ["AppImage"], "icon": "assets/icon.png"}
+  },
+  "dependencies": {
+    "electron-store": "^8.2.0",
+    "libp2p": "^2.8.4",
+    "@chainsafe/libp2p-gossipsub": "^14.1.2",
+    "@chainsafe/libp2p-noise": "^16.1.0",
+    "@chainsafe/libp2p-yamux": "^7.0.1",
+    "@libp2p/bootstrap": "^11.0.11",
+    "@libp2p/identify": "^3.0.11",
+    "@libp2p/kad-dht": "^14.1.0",
+    "@libp2p/mdns": "^11.0.12",
+    "@libp2p/tcp": "^10.0.14",
+    "@libp2p/websockets": "^9.0.11",
+    "@multiformats/multiaddr": "^12.3.5",
+    "uint8arrays": "^5.1.0",
+    "uuid": "^10.0.0"
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  }
+}
