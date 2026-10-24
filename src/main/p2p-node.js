@@ -842,7 +842,7 @@ class P2PNode extends EventEmitter {
   async initializeRelay() {
     try {
       // Create relay server (volunteer mode)
-      this.relayServer = new RelayServer(this.node);
+      this.relayServer = new RelayServer(this.node, { crypto: this.crypto });
       
       // Create relay client (to use other relays)
       this.relayClient = new RelayClient(this.node);

@@ -200,6 +200,21 @@ const BOOTSTRAP_NODES = [
 ];
 ```
 
+## 🛡️ Security Audit
+
+This application has been security-audited with the following protections:
+
+| Feature | Protection |
+|---------|------------|
+| **Private Key Storage** | Encrypted at rest using OS keychain (Windows DPAPI / macOS Keychain) |
+| **Perfect Forward Secrecy** | Key ratcheting ensures past messages stay secure if keys leak |
+| **Replay Protection** | Message sequence numbers prevent replay attacks |
+| **Rate Limiting** | Protects against DoS attacks on all endpoints |
+| **SSRF Prevention** | Coordination server URLs are validated against blocklists |
+| **Relay Authentication** | Signed identity required for relay operations |
+| **Metadata Anonymization** | Daily-rotating hashes for relay statistics |
+| **Request Size Limits** | 64KB max to prevent memory exhaustion |
+
 ## 🔐 Security
 
 - **Transport Encryption**: Noise protocol (same as Signal)

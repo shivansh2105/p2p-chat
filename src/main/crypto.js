@@ -1,67 +1,159 @@
 /**
- * P2P Chat Crypto Module
- * Implements Tailscale-like key management with per-chat encryption
+ * P2P Chat Crypto Module (Security Hardened)
  * 
- * Key Types:
- * - Identity Key (Ed25519): Long-term identity, signs messages, stored in DHT
- * - Session Key (X25519): Per-chat ephemeral key for encryption
- * - Message Key: Derived from session key via HKDF for each message
- * 
- * Architecture (Tailscale-inspired):
- * - Control Plane: Username→PublicKey mapping in DHT (like Tailscale coord server)
- * - Data Plane: Direct P2P encrypted messages (like WireGuard tunnels)
+ * SECURITY FIXES APPLIED:
+ * - Private key encrypted at rest using Electron safeStorage or machine-derived key
+ * - Key ratcheting for Perfect Forward Secrecy (PFS)
+ * - Message sequence numbers to prevent replay attacks
+ * - Dynamic HKDF salt using peer IDs
+ * - Strong scrypt parameters (N=2^17)
+ * - Memory clearing for sensitive data
  */
 
 const crypto = require('crypto');
+const path = require('path');
+const fs = require('fs');
+
+// Try to use Electron's secure storage
+let safeStorage = null;
+try {
+  const { safeStorage: ss } = require('electron');
+  if (ss && ss.isEncryptionAvailable()) {
+    safeStorage = ss;
+  }
+} catch (e) {}
 
 class P2PCrypto {
   constructor(dataDir) {
     this.dataDir = dataDir;
-    this.identityKeyPair = null;  // Ed25519 for signing
-    this.sessionKeys = new Map(); // peerId -> { ourEphemeral, theirPublic, sharedSecret }
+    this.identityKeyPair = null;
+    this.sessionKeys = new Map();
   }
 
-  /**
-   * Initialize or load identity keypair
-   * This is the user's permanent identity (like Tailscale's node key)
-   */
   async initializeIdentity() {
-    const keyPath = require('path').join(this.dataDir, 'identity.key');
-    const fs = require('fs');
+    const keyPath = path.join(this.dataDir, 'identity.key');
+    const encryptedKeyPath = path.join(this.dataDir, 'identity.key.enc');
     
     try {
-      if (fs.existsSync(keyPath)) {
-        // Load existing identity
+      fs.mkdirSync(this.dataDir, { recursive: true });
+
+      if (fs.existsSync(encryptedKeyPath)) {
+        const encryptedData = fs.readFileSync(encryptedKeyPath);
+        let keyData;
+        
+        if (safeStorage) {
+          const decrypted = safeStorage.decryptString(encryptedData);
+          keyData = JSON.parse(decrypted);
+        } else {
+          keyData = this.decryptKeyFile(encryptedData);
+        }
+        
+        this.identityKeyPair = {
+          publicKey: Buffer.from(keyData.publicKey, 'base64'),
+          privateKey: Buffer.from(keyData.privateKey, 'base64')
+        };
+        console.log('[Crypto] Loaded encrypted identity key');
+      } 
+      else if (fs.existsSync(keyPath)) {
+        // Migrate old plaintext key
         const keyData = JSON.parse(fs.readFileSync(keyPath, 'utf8'));
         this.identityKeyPair = {
           publicKey: Buffer.from(keyData.publicKey, 'base64'),
           privateKey: Buffer.from(keyData.privateKey, 'base64')
         };
-        console.log('[Crypto] Loaded existing identity key');
-      } else {
-        // Generate new identity
+        await this.saveIdentitySecure();
+        this.secureDelete(keyPath);
+        console.log('[Crypto] Migrated identity key to encrypted storage');
+      } 
+      else {
         this.identityKeyPair = await this.generateEd25519KeyPair();
-        
-        // Save to disk (like Tailscale stores machine key)
-        fs.mkdirSync(this.dataDir, { recursive: true });
-        fs.writeFileSync(keyPath, JSON.stringify({
-          publicKey: this.identityKeyPair.publicKey.toString('base64'),
-          privateKey: this.identityKeyPair.privateKey.toString('base64')
-        }), { mode: 0o600 }); // Restrict permissions
-        
+        await this.saveIdentitySecure();
         console.log('[Crypto] Generated new identity key');
       }
       
       return this.getPublicKeyFingerprint();
     } catch (error) {
-      console.error('[Crypto] Failed to initialize identity:', error);
+      console.error('[Crypto] Failed to initialize identity:', error.message);
       throw error;
     }
   }
 
-  /**
-   * Generate Ed25519 keypair for identity/signing
-   */
+  async saveIdentitySecure() {
+    const encryptedKeyPath = path.join(this.dataDir, 'identity.key.enc');
+    const keyData = JSON.stringify({
+      publicKey: this.identityKeyPair.publicKey.toString('base64'),
+      privateKey: this.identityKeyPair.privateKey.toString('base64'),
+      version: 2
+    });
+
+    if (safeStorage) {
+      const encrypted = safeStorage.encryptString(keyData);
+      fs.writeFileSync(encryptedKeyPath, encrypted, { mode: 0o600 });
+    } else {
+      const encrypted = this.encryptKeyFile(keyData);
+      fs.writeFileSync(encryptedKeyPath, encrypted, { mode: 0o600 });
+    }
+  }
+
+  encryptKeyFile(data) {
+    const machineId = this.getMachineEntropy();
+    const salt = crypto.randomBytes(32);
+    const key = crypto.scryptSync(machineId, salt, 32, { N: 2 ** 17, r: 8, p: 1 });
+    const iv = crypto.randomBytes(12);
+    
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+    let encrypted = cipher.update(data, 'utf8');
+    encrypted = Buffer.concat([encrypted, cipher.final()]);
+    const authTag = cipher.getAuthTag();
+    
+    return Buffer.concat([Buffer.from([2]), salt, iv, authTag, encrypted]);
+  }
+
+  decryptKeyFile(data) {
+    const version = data[0];
+    if (version !== 2) throw new Error('Unknown key file version');
+    
+    const salt = data.slice(1, 33);
+    const iv = data.slice(33, 45);
+    const authTag = data.slice(45, 61);
+    const encrypted = data.slice(61);
+    
+    const machineId = this.getMachineEntropy();
+    const key = crypto.scryptSync(machineId, salt, 32, { N: 2 ** 17, r: 8, p: 1 });
+    
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(authTag);
+    
+    let decrypted = decipher.update(encrypted);
+    decrypted = Buffer.concat([decrypted, decipher.final()]);
+    
+    return JSON.parse(decrypted.toString('utf8'));
+  }
+
+  getMachineEntropy() {
+    const os = require('os');
+    const components = [
+      os.hostname(), os.homedir(), os.platform(), os.arch(),
+      process.env.USERNAME || process.env.USER || '', this.dataDir
+    ];
+    return crypto.createHash('sha256').update(components.join('|')).digest();
+  }
+
+  secureDelete(filePath) {
+    try {
+      if (fs.existsSync(filePath)) {
+        const stats = fs.statSync(filePath);
+        const fd = fs.openSync(filePath, 'r+');
+        fs.writeSync(fd, crypto.randomBytes(stats.size));
+        fs.fsyncSync(fd);
+        fs.closeSync(fd);
+        fs.unlinkSync(filePath);
+      }
+    } catch (e) {
+      try { fs.unlinkSync(filePath); } catch (e2) {}
+    }
+  }
+
   async generateEd25519KeyPair() {
     return new Promise((resolve, reject) => {
       crypto.generateKeyPair('ed25519', {
@@ -74,246 +166,200 @@ class P2PCrypto {
     });
   }
 
-  /**
-   * Generate X25519 ephemeral keypair for key exchange (per-chat)
-   * Like WireGuard's session keys
-   */
   generateEphemeralKeyPair() {
     const ecdh = crypto.createECDH('x25519');
     ecdh.generateKeys();
-    return {
-      publicKey: ecdh.getPublicKey(),
-      privateKey: ecdh.getPrivateKey(),
-      ecdh
-    };
+    return { publicKey: ecdh.getPublicKey(), privateKey: ecdh.getPrivateKey(), ecdh };
   }
 
-  /**
-   * Get public key fingerprint (short identifier)
-   */
   getPublicKeyFingerprint() {
     if (!this.identityKeyPair) return null;
-    const hash = crypto.createHash('sha256')
-      .update(this.identityKeyPair.publicKey)
-      .digest();
-    return hash.slice(0, 8).toString('hex');
+    return crypto.createHash('sha256').update(this.identityKeyPair.publicKey).digest().slice(0, 8).toString('hex');
   }
 
-  /**
-   * Get full public key for sharing
-   */
   getPublicKey() {
     if (!this.identityKeyPair) return null;
     return this.identityKeyPair.publicKey.toString('base64');
   }
 
-  /**
-   * Sign data with identity key
-   */
   sign(data) {
     if (!this.identityKeyPair) throw new Error('Identity not initialized');
-    
     const privateKey = crypto.createPrivateKey({
-      key: this.identityKeyPair.privateKey,
-      format: 'der',
-      type: 'pkcs8'
+      key: this.identityKeyPair.privateKey, format: 'der', type: 'pkcs8'
     });
-    
     return crypto.sign(null, Buffer.from(data), privateKey).toString('base64');
   }
 
-  /**
-   * Verify signature from a peer
-   */
   verify(data, signature, publicKeyBase64) {
     try {
       const publicKey = crypto.createPublicKey({
-        key: Buffer.from(publicKeyBase64, 'base64'),
-        format: 'der',
-        type: 'spki'
+        key: Buffer.from(publicKeyBase64, 'base64'), format: 'der', type: 'spki'
       });
-      
       return crypto.verify(null, Buffer.from(data), publicKey, Buffer.from(signature, 'base64'));
     } catch (error) {
-      console.error('[Crypto] Verification failed:', error);
       return false;
     }
   }
 
-  /**
-   * Initiate encrypted session with a peer (key exchange)
-   * Returns ephemeral public key to send to peer
-   */
-  initiateSession(peerId) {
+  initiateSession(peerId, ourPeerId) {
     const ephemeral = this.generateEphemeralKeyPair();
-    
     this.sessionKeys.set(peerId, {
-      ourEphemeral: ephemeral,
-      theirPublic: null,
-      sharedSecret: null,
-      initiated: true
+      ourEphemeral: ephemeral, ourPeerId: ourPeerId || 'unknown', theirPeerId: peerId,
+      theirPublic: null, sharedSecret: null, chainKey: null,
+      messageCounter: 0, receivedCounters: new Set(), initiated: true, createdAt: Date.now()
     });
-    
     return ephemeral.publicKey.toString('base64');
   }
 
-  /**
-   * Complete session with peer's ephemeral key
-   * Derives shared secret using X25519 ECDH
-   */
-  completeSession(peerId, theirPublicKeyBase64) {
+  completeSession(peerId, theirPublicKeyBase64, ourPeerId) {
     let session = this.sessionKeys.get(peerId);
     
     if (!session) {
-      // We're responding to their initiation
       const ephemeral = this.generateEphemeralKeyPair();
       session = {
-        ourEphemeral: ephemeral,
+        ourEphemeral: ephemeral, ourPeerId: ourPeerId || 'unknown', theirPeerId: peerId,
         theirPublic: Buffer.from(theirPublicKeyBase64, 'base64'),
-        sharedSecret: null,
-        initiated: false
+        sharedSecret: null, chainKey: null, messageCounter: 0,
+        receivedCounters: new Set(), initiated: false, createdAt: Date.now()
       };
     } else {
       session.theirPublic = Buffer.from(theirPublicKeyBase64, 'base64');
     }
     
-    // Compute shared secret (X25519 ECDH)
     session.sharedSecret = session.ourEphemeral.ecdh.computeSecret(session.theirPublic);
     
-    // Derive encryption key using HKDF
-    session.encryptionKey = crypto.hkdfSync(
-      'sha256',
-      session.sharedSecret,
-      'p2p-chat-v1',  // Salt
-      'message-encryption',  // Info
-      32  // Key length (256-bit)
-    );
+    // SECURITY: Unique salt from peer IDs
+    const peerIds = [session.ourPeerId, session.theirPeerId].sort();
+    const salt = crypto.createHash('sha256').update(peerIds.join(':')).digest();
     
+    session.chainKey = crypto.hkdfSync('sha256', session.sharedSecret, salt, 'p2p-chat-chain-v2', 32);
     this.sessionKeys.set(peerId, session);
     
     return session.ourEphemeral.publicKey.toString('base64');
   }
 
-  /**
-   * Check if we have an active encrypted session with peer
-   */
+  ratchetChainKey(session) {
+    session.chainKey = crypto.hkdfSync('sha256', session.chainKey, Buffer.from('ratchet'), 'chain-ratchet', 32);
+    return crypto.hkdfSync('sha256', session.chainKey, Buffer.from('message'), 'message-key', 32);
+  }
+
   hasSession(peerId) {
     const session = this.sessionKeys.get(peerId);
     return session && session.sharedSecret;
   }
 
-  /**
-   * Encrypt message for a specific peer
-   * Uses AES-256-GCM (same as WireGuard's ChaCha20-Poly1305 security level)
-   */
   encryptMessage(peerId, plaintext) {
     const session = this.sessionKeys.get(peerId);
-    if (!session || !session.encryptionKey) {
-      throw new Error('No encryption session with peer');
-    }
+    if (!session || !session.chainKey) throw new Error('No encryption session with peer');
     
-    // Generate random IV
+    session.messageCounter++;
+    const messageKey = this.ratchetChainKey(session);
     const iv = crypto.randomBytes(12);
     
-    // Create cipher
-    const cipher = crypto.createCipheriv('aes-256-gcm', session.encryptionKey, iv);
+    // Include message number for replay protection
+    const header = Buffer.alloc(8);
+    header.writeBigUInt64BE(BigInt(session.messageCounter));
+    const payload = Buffer.concat([header, Buffer.from(plaintext, 'utf8')]);
     
-    // Encrypt
-    let encrypted = cipher.update(plaintext, 'utf8');
+    const cipher = crypto.createCipheriv('aes-256-gcm', messageKey, iv);
+    let encrypted = cipher.update(payload);
     encrypted = Buffer.concat([encrypted, cipher.final()]);
     
-    // Get auth tag
-    const authTag = cipher.getAuthTag();
-    
-    // Return IV + authTag + ciphertext as base64
-    return Buffer.concat([iv, authTag, encrypted]).toString('base64');
+    messageKey.fill(0);
+    return Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString('base64');
   }
 
-  /**
-   * Decrypt message from a specific peer
-   */
   decryptMessage(peerId, ciphertext) {
     const session = this.sessionKeys.get(peerId);
-    if (!session || !session.encryptionKey) {
-      throw new Error('No decryption session with peer');
-    }
+    if (!session || !session.chainKey) throw new Error('No decryption session with peer');
     
     const data = Buffer.from(ciphertext, 'base64');
-    
-    // Extract IV (12 bytes), authTag (16 bytes), and ciphertext
     const iv = data.slice(0, 12);
     const authTag = data.slice(12, 28);
     const encrypted = data.slice(28);
     
-    // Create decipher
-    const decipher = crypto.createDecipheriv('aes-256-gcm', session.encryptionKey, iv);
+    const messageKey = this.ratchetChainKey(session);
+    const decipher = crypto.createDecipheriv('aes-256-gcm', messageKey, iv);
     decipher.setAuthTag(authTag);
     
-    // Decrypt
     let decrypted = decipher.update(encrypted);
     decrypted = Buffer.concat([decrypted, decipher.final()]);
+    messageKey.fill(0);
     
-    return decrypted.toString('utf8');
+    const messageNumber = Number(decrypted.slice(0, 8).readBigUInt64BE());
+    
+    // SECURITY: Replay protection
+    if (session.receivedCounters.has(messageNumber)) {
+      throw new Error('Replay attack detected');
+    }
+    if (messageNumber > session.messageCounter + 1000) {
+      throw new Error('Invalid message number');
+    }
+    
+    session.receivedCounters.add(messageNumber);
+    if (session.receivedCounters.size > 10000) {
+      const sorted = Array.from(session.receivedCounters).sort((a, b) => a - b);
+      for (let i = 0; i < 5000; i++) session.receivedCounters.delete(sorted[i]);
+    }
+    
+    return decrypted.slice(8).toString('utf8');
   }
 
-  /**
-   * Export session for backup (encrypted with user password)
-   */
   exportSessions(password) {
     const sessions = {};
     for (const [peerId, session] of this.sessionKeys) {
-      if (session.sharedSecret) {
+      if (session.chainKey) {
         sessions[peerId] = {
-          sharedSecret: session.sharedSecret.toString('base64'),
-          encryptionKey: session.encryptionKey.toString('base64')
+          chainKey: session.chainKey.toString('base64'),
+          messageCounter: session.messageCounter,
+          ourPeerId: session.ourPeerId, theirPeerId: session.theirPeerId
         };
       }
     }
     
-    // Encrypt with password
-    const salt = crypto.randomBytes(16);
-    const key = crypto.scryptSync(password, salt, 32);
+    const salt = crypto.randomBytes(32);
+    const key = crypto.scryptSync(password, salt, 32, { N: 2 ** 17, r: 8, p: 1 });
     const iv = crypto.randomBytes(12);
     const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
     
     let encrypted = cipher.update(JSON.stringify(sessions), 'utf8');
     encrypted = Buffer.concat([encrypted, cipher.final()]);
-    const authTag = cipher.getAuthTag();
     
     return {
-      salt: salt.toString('base64'),
-      iv: iv.toString('base64'),
-      authTag: authTag.toString('base64'),
-      data: encrypted.toString('base64')
+      version: 2, salt: salt.toString('base64'), iv: iv.toString('base64'),
+      authTag: cipher.getAuthTag().toString('base64'), data: encrypted.toString('base64')
     };
   }
 
-  /**
-   * Import sessions from backup
-   */
   importSessions(backup, password) {
     const salt = Buffer.from(backup.salt, 'base64');
-    const key = crypto.scryptSync(password, salt, 32);
-    const iv = Buffer.from(backup.iv, 'base64');
-    const authTag = Buffer.from(backup.authTag, 'base64');
-    const data = Buffer.from(backup.data, 'base64');
+    const params = backup.version >= 2 ? { N: 2 ** 17, r: 8, p: 1 } : {};
+    const key = crypto.scryptSync(password, salt, 32, params);
     
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-    decipher.setAuthTag(authTag);
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(backup.iv, 'base64'));
+    decipher.setAuthTag(Buffer.from(backup.authTag, 'base64'));
     
-    let decrypted = decipher.update(data);
+    let decrypted = decipher.update(Buffer.from(backup.data, 'base64'));
     decrypted = Buffer.concat([decrypted, decipher.final()]);
     
     const sessions = JSON.parse(decrypted.toString('utf8'));
-    
-    for (const [peerId, sessionData] of Object.entries(sessions)) {
+    for (const [peerId, data] of Object.entries(sessions)) {
       this.sessionKeys.set(peerId, {
-        sharedSecret: Buffer.from(sessionData.sharedSecret, 'base64'),
-        encryptionKey: Buffer.from(sessionData.encryptionKey, 'base64')
+        chainKey: Buffer.from(data.chainKey, 'base64'),
+        messageCounter: data.messageCounter || 0,
+        ourPeerId: data.ourPeerId, theirPeerId: data.theirPeerId,
+        receivedCounters: new Set()
       });
     }
-    
     return Object.keys(sessions).length;
+  }
+
+  clearAllSessions() {
+    for (const [, session] of this.sessionKeys) {
+      if (session.chainKey) session.chainKey.fill(0);
+      if (session.sharedSecret) session.sharedSecret.fill(0);
+    }
+    this.sessionKeys.clear();
   }
 }
 
