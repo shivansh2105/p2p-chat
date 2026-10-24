@@ -7,12 +7,42 @@
 
 import { Preferences } from '@capacitor/preferences';
 
-// Free public STUN servers for NAT traversal
+// Free public STUN + TURN servers for NAT traversal
+// TURN servers relay traffic when direct P2P fails (required for symmetric NAT)
 const ICE_SERVERS = [
+  // STUN servers (discover public IP)
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun.cloudflare.com:3478' },
-  { urls: 'stun:stun.services.mozilla.com:3478' }
+  
+  // Free TURN servers from Open Relay Project (relay traffic through firewalls)
+  {
+    urls: 'turn:openrelay.metered.ca:80',
+    username: 'openrelayproject',
+    credential: 'openrelayproject'
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443',
+    username: 'openrelayproject',
+    credential: 'openrelayproject'
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+    username: 'openrelayproject',
+    credential: 'openrelayproject'
+  },
+  
+  // Backup TURN servers
+  {
+    urls: 'turn:relay.metered.ca:80',
+    username: 'e8dd65b92c62d5e90c2495b1',
+    credential: 'kfOyCZvnMCGtk2xR'
+  },
+  {
+    urls: 'turn:relay.metered.ca:443',
+    username: 'e8dd65b92c62d5e90c2495b1',
+    credential: 'kfOyCZvnMCGtk2xR'
+  }
 ];
 
 class P2PChatMobile {
@@ -63,6 +93,18 @@ class P2PChatMobile {
   async createConnectionOffer() {
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     
+    // Monitor connection state
+    pc.oniceconnectionstatechange = () => {
+      console.log('ICE connection state:', pc.iceConnectionState);
+      if (pc.iceConnectionState === 'failed') {
+        console.error('ICE connection failed - may need TURN server');
+      }
+    };
+    
+    pc.onconnectionstatechange = () => {
+      console.log('Connection state:', pc.connectionState);
+    };
+    
     // Create data channel for messaging
     const dataChannel = pc.createDataChannel('chat', { ordered: true });
     this.setupDataChannel(dataChannel, null);
@@ -96,6 +138,18 @@ class P2PChatMobile {
       if (info.type !== 'offer') throw new Error('Invalid offer');
 
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+      
+      // Monitor connection state
+      pc.oniceconnectionstatechange = () => {
+        console.log('ICE connection state:', pc.iceConnectionState);
+        if (pc.iceConnectionState === 'failed') {
+          console.error('ICE connection failed - may need TURN server');
+        }
+      };
+      
+      pc.onconnectionstatechange = () => {
+        console.log('Connection state:', pc.connectionState);
+      };
       
       // Handle incoming data channel
       pc.ondatachannel = (event) => {
@@ -215,14 +269,29 @@ class P2PChatMobile {
     if (pc.iceGatheringState === 'complete') return;
     
     return new Promise((resolve) => {
+      let candidateCount = 0;
+      
+      // Log ICE candidates for debugging
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          candidateCount++;
+          console.log(`ICE candidate ${candidateCount}:`, event.candidate.type, event.candidate.address);
+        }
+      };
+      
       const checkState = () => {
         if (pc.iceGatheringState === 'complete') {
+          console.log(`ICE gathering complete. Total candidates: ${candidateCount}`);
           resolve();
         }
       };
       pc.onicegatheringstatechange = checkState;
-      // Timeout after 10 seconds
-      setTimeout(resolve, 10000);
+      
+      // Timeout after 15 seconds (TURN candidates take longer)
+      setTimeout(() => {
+        console.log(`ICE gathering timeout. Candidates gathered: ${candidateCount}`);
+        resolve();
+      }, 15000);
     });
   }
 
