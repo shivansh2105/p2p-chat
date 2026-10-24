@@ -233,6 +233,13 @@ class P2PCrypto {
     const salt = crypto.createHash('sha256').update(peerIds.join(':')).digest();
     
     session.chainKey = crypto.hkdfSync('sha256', session.sharedSecret, salt, 'p2p-chat-chain-v2', 32);
+    
+    // SECURITY: Clear sensitive ephemeral material after key derivation
+    if (session.ourEphemeral.privateKey) session.ourEphemeral.privateKey.fill(0);
+    session.sharedSecret.fill(0);
+    session.sharedSecret = null;
+    session.ourEphemeral.ecdh = null; // Remove ECDH object containing private key
+    
     this.sessionKeys.set(peerId, session);
     
     return session.ourEphemeral.publicKey.toString('base64');

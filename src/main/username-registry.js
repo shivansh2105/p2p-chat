@@ -30,6 +30,12 @@ class UsernameRegistry {
     this.lookupTimestamps = new Map();
     this.RATE_LIMIT_WINDOW = 60000; // 1 minute
     this.RATE_LIMIT_MAX = 30; // max lookups per window
+    
+    // SECURITY: Cache size limits to prevent memory exhaustion
+    this.MAX_CACHE_SIZE = 10000;
+    this.MAX_GOSSIP_RECORDS_PER_MINUTE = 100;
+    this.gossipRecordCount = 0;
+    this.lastGossipReset = Date.now();
   }
 
   /**
@@ -256,10 +262,34 @@ class UsernameRegistry {
     try {
       const msg = JSON.parse(uint8ArrayToString(event.detail.data));
 
+      // SECURITY: Rate limit gossip record acceptance
+      const now = Date.now();
+      if (now - this.lastGossipReset > 60000) {
+        this.gossipRecordCount = 0;
+        this.lastGossipReset = now;
+      }
+      
       if (msg.type === 'register' && msg.record) {
+        // SECURITY: Enforce gossip rate limit
+        if (this.gossipRecordCount >= this.MAX_GOSSIP_RECORDS_PER_MINUTE) {
+          console.warn('[Registry] Gossip rate limit exceeded, ignoring record');
+          return;
+        }
+        
+        // SECURITY: Enforce cache size limit
+        if (this.cache.size >= this.MAX_CACHE_SIZE) {
+          // Evict oldest expired entries
+          this.evictExpiredEntries();
+          if (this.cache.size >= this.MAX_CACHE_SIZE) {
+            console.warn('[Registry] Cache size limit reached, ignoring record');
+            return;
+          }
+        }
+        
         if (this.verifyRecord(msg.record)) {
           this.cache.set(msg.record.username.toLowerCase(), msg.record);
           this.reverseCache.set(msg.record.peerId, msg.record.username);
+          this.gossipRecordCount++;
         }
       } else if (msg.type === 'lookup' && msg.username) {
         const cached = this.cache.get(msg.username.toLowerCase());
@@ -273,6 +303,19 @@ class UsernameRegistry {
         }
       }
     } catch (error) {}
+  }
+
+  /**
+   * Evict expired entries from cache
+   */
+  evictExpiredEntries() {
+    const now = Date.now();
+    for (const [username, record] of this.cache) {
+      if (record.expiresAt <= now) {
+        this.cache.delete(username);
+        this.reverseCache.delete(record.peerId);
+      }
+    }
   }
 
   getUsernameForPeer(peerId) {

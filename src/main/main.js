@@ -66,9 +66,19 @@ function setupIpcHandlers() {
   // User management
   ipcMain.handle('user:get', () => store.get('user'));
   ipcMain.handle('user:create', async (_, username) => {
+    // SECURITY: Input validation
+    if (!username || typeof username !== 'string') {
+      throw new Error('Invalid username');
+    }
+    // Sanitize username - only allow safe characters
+    const sanitizedUsername = username.replace(/[<>\"'&]/g, '').slice(0, 50);
+    if (sanitizedUsername.length < 1) {
+      throw new Error('Username too short or contains invalid characters');
+    }
+    
     const user = {
       id: p2pNode.peerId,
-      username,
+      username: sanitizedUsername,
       publicKey: p2pNode.publicKey,
       createdAt: Date.now()
     };
@@ -97,9 +107,18 @@ function setupIpcHandlers() {
 
   // Username operations
   ipcMain.handle('user:updateUsername', (_, username) => {
+    // SECURITY: Input validation
+    if (!username || typeof username !== 'string') {
+      throw new Error('Invalid username');
+    }
+    const sanitizedUsername = username.replace(/[<>\"'&]/g, '').slice(0, 50);
+    if (sanitizedUsername.length < 1) {
+      throw new Error('Username too short or contains invalid characters');
+    }
+    
     const user = store.get('user');
     if (user) {
-      user.username = username;
+      user.username = sanitizedUsername;
       store.set('user', user);
       p2pNode.announcePresence(); // Broadcast new username
     }
@@ -249,6 +268,11 @@ function setupIpcHandlers() {
   });
 
   p2pNode.on('peer:presence', (presence) => {
+    // SECURITY: Sanitize username to prevent XSS
+    if (presence.username && typeof presence.username === 'string') {
+      presence.username = presence.username.replace(/[<>\"'&]/g, '').slice(0, 50);
+    }
+    
     // Update chat name when we receive username
     if (presence.username && presence.username !== 'Anonymous') {
       database.updateChatName(presence.id, presence.username);

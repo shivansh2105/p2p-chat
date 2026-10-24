@@ -241,8 +241,9 @@ class RelayServer extends EventEmitter {
       return this.crypto.verify(dataToSign, request.signature, request.publicKey);
     }
     
-    // If no crypto module, fall back to basic validation
-    return true;
+    // SECURITY FIX: If no crypto module, REJECT requests (fail secure)
+    console.warn('[Relay] No crypto module available - rejecting request');
+    return false;
   }
 
   async handleReservation(stream, peerId, request) {
