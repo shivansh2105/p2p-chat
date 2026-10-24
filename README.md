@@ -2,6 +2,21 @@
 
 A Telegram-like chat application that works **completely serverless** using peer-to-peer networking, similar to how BitTorrent and Bitcoin work.
 
+## 🔥 New: Username Registry & End-to-End Encryption
+
+**Connect by username, not addresses!** Like @handles but decentralized:
+
+```
+You: "Hey, add me on P2P Chat! My username is @alice"
+Friend: Searches "alice" → Finds you → Connects directly
+```
+
+**Tailscale-inspired architecture:**
+- **Ed25519 Identity Keys** — Your permanent cryptographic identity
+- **X25519 Session Keys** — Per-chat encryption (like Signal)
+- **DHT Username Registry** — Globally unique usernames stored in the network
+- **Optional Coordination Server** — Faster lookups (works without it too)
+
 ## 🌐 How It Works (No Servers Required!)
 
 ```
@@ -154,6 +169,48 @@ const BOOTSTRAP_NODES = [
 - **Message Privacy**: Messages only readable by sender/recipient
 - **No Metadata Leakage**: No central server logs your activity
 - **Backup Encryption**: AES-256-GCM with user-derived keys
+
+### Encryption Architecture (Tailscale-inspired)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    SECURITY ARCHITECTURE                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  IDENTITY LAYER (Ed25519)                                       │
+│  ├── Each user has a permanent keypair                          │
+│  ├── Public key = Your identity (like Tailscale node key)       │
+│  ├── Private key NEVER leaves device                            │
+│  └── Used to sign username registrations                        │
+│                                                                  │
+│  SESSION LAYER (X25519 ECDH)                                    │
+│  ├── Ephemeral keys generated per chat                          │
+│  ├── Diffie-Hellman key exchange                                │
+│  └── Perfect forward secrecy                                    │
+│                                                                  │
+│  MESSAGE LAYER (AES-256-GCM)                                    │
+│  ├── Symmetric encryption for speed                             │
+│  ├── Keys derived via HKDF from session secret                  │
+│  └── Each message has unique IV                                 │
+│                                                                  │
+│  TRANSPORT LAYER (Noise Protocol)                               │
+│  └── All P2P connections encrypted                              │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Username Registry (DHT-based)
+
+Usernames are stored in the distributed hash table:
+
+| Key | Value |
+|-----|-------|
+| `/p2pchat/username/alice` | `{ publicKey, peerId, addresses, signature }` |
+
+- **Globally unique** — First come, first served
+- **Self-sovereign** — You own your username (signed by your key)
+- **Decentralized** — No central authority controls usernames
+- **Renewable** — Re-announce every 24 hours to keep active
 
 ## 📊 Network Properties
 

@@ -51,6 +51,10 @@ const EventEmitter = require('events');
 const { v4: uuidv4 } = require('uuid');
 const os = require('os');
 
+// Enhanced crypto and naming modules (Tailscale-inspired)
+const P2PCrypto = require('./crypto');
+const UsernameRegistry = require('./username-registry');
+
 // ═══════════════════════════════════════════════════════════════════
 // FREE PUBLIC STUN SERVERS - No cost, no maintenance, no servers needed
 // These are provided freely by Google, Cloudflare, Mozilla etc.
@@ -68,10 +72,11 @@ const MESSAGE_PROTOCOL = '/p2p-chat/message/1.0.0';
 const SYNC_PROTOCOL = '/p2p-chat/sync/1.0.0';
 
 class P2PNode extends EventEmitter {
-  constructor(database, store) {
+  constructor(database, store, dataDir) {
     super();
     this.database = database;
     this.store = store;
+    this.dataDir = dataDir || require('path').join(require('os').homedir(), '.p2p-chat');
     this.node = null;
     this.peerId = null;
     this.publicKey = null;
@@ -80,6 +85,10 @@ class P2PNode extends EventEmitter {
     this.peerUsernames = new Map();      // Map peerId -> username
     this.messageCache = new Map();        // Deduplicate messages
     this.pendingMessages = new Map();     // Queue for offline peers
+    
+    // Tailscale-inspired modules
+    this.crypto = new P2PCrypto(this.dataDir);
+    this.registry = null;  // Initialized after node starts
   }
 
   async start() {
@@ -162,6 +171,9 @@ class P2PNode extends EventEmitter {
     await this.setupProtocols();
     this.setupEventHandlers();
     await this.node.start();
+
+    // Initialize Tailscale-inspired crypto and naming
+    await this.initializeCrypto();
 
     // Get shareable addresses
     this.publicAddresses = this.getShareableAddresses();
@@ -769,10 +781,239 @@ class P2PNode extends EventEmitter {
     return {
       peerId: this.peerId,
       publicKey: this.publicKey,
+      identityKey: this.crypto?.getPublicKey(),
+      keyFingerprint: this.crypto?.getPublicKeyFingerprint(),
       addresses: this.getShareableAddresses(),
       connectedPeers: this.connectedPeers.size,
-      knownPeers: this.knownPeers.size
+      knownPeers: this.knownPeers.size,
+      registeredUsername: this.registry?.myUsername
     };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // TAILSCALE-INSPIRED CRYPTO & NAMING
+  // ═══════════════════════════════════════════════════════════════════
+
+  /**
+   * Initialize crypto identity and username registry
+   */
+  async initializeCrypto() {
+    try {
+      // Initialize identity keypair
+      const fingerprint = await this.crypto.initializeIdentity();
+      console.log(`[Crypto] Identity key: ${fingerprint}`);
+
+      // Initialize username registry
+      this.registry = new UsernameRegistry(this.node, this.crypto);
+
+      // Subscribe to registry topic
+      await this.node.services.pubsub.subscribe('p2p-chat:registry');
+
+      // Handle registry messages
+      this.node.services.pubsub.addEventListener('message', (event) => {
+        if (event.detail.topic === 'p2p-chat:registry') {
+          this.registry.handleRegistryMessage(event);
+        }
+      });
+
+      console.log('[Crypto] Username registry initialized');
+    } catch (error) {
+      console.error('[Crypto] Initialization failed:', error);
+    }
+  }
+
+  /**
+   * Register username in the DHT (globally unique)
+   * @param {string} username - Desired username (3-20 chars, alphanumeric)
+   * @returns {Promise<object>} Registration record
+   */
+  async registerUsername(username) {
+    if (!this.registry) {
+      throw new Error('Registry not initialized');
+    }
+    return await this.registry.registerUsername(username);
+  }
+
+  /**
+   * Search for a user by username
+   * @param {string} username - Username to find
+   * @returns {Promise<object|null>} User record with peerId, publicKey, addresses
+   */
+  async lookupUsername(username) {
+    if (!this.registry) {
+      throw new Error('Registry not initialized');
+    }
+    return await this.registry.lookupUsername(username);
+  }
+
+  /**
+   * Search usernames by prefix
+   * @param {string} prefix - Search prefix
+   * @returns {Array} Matching user records
+   */
+  searchUsernames(prefix) {
+    if (!this.registry) return [];
+    return this.registry.searchUsernames(prefix);
+  }
+
+  /**
+   * Connect to user by username (instead of raw address)
+   * @param {string} username - Username to connect to
+   * @returns {Promise<boolean>} Success
+   */
+  async connectByUsername(username) {
+    const record = await this.lookupUsername(username);
+    if (!record) {
+      throw new Error(`User "${username}" not found`);
+    }
+
+    // Try each address
+    for (const addr of record.addresses) {
+      try {
+        await this.connectToPeer(addr);
+        
+        // Store username mapping
+        this.peerUsernames.set(record.peerId, record.username);
+        
+        return true;
+      } catch (error) {
+        console.warn(`[P2P] Address ${addr} failed:`, error.message);
+      }
+    }
+
+    throw new Error(`Could not connect to ${username}`);
+  }
+
+  /**
+   * Initiate encrypted session with peer
+   * @param {string} peerId - Peer to establish session with
+   * @returns {string} Our ephemeral public key to send
+   */
+  initiateEncryptedSession(peerId) {
+    return this.crypto.initiateSession(peerId);
+  }
+
+  /**
+   * Complete encrypted session with peer's key
+   * @param {string} peerId - Peer ID
+   * @param {string} theirPublicKey - Their ephemeral public key (base64)
+   * @returns {string} Our ephemeral public key
+   */
+  completeEncryptedSession(peerId, theirPublicKey) {
+    return this.crypto.completeSession(peerId, theirPublicKey);
+  }
+
+  /**
+   * Send encrypted message to peer
+   * @param {string} peerId - Recipient peer ID
+   * @param {string} content - Message content
+   * @returns {Promise<void>}
+   */
+  async sendEncryptedMessage(peerId, content) {
+    // Ensure we have an encrypted session
+    if (!this.crypto.hasSession(peerId)) {
+      // Initiate key exchange first
+      await this.initiateKeyExchange(peerId);
+    }
+
+    // Encrypt the message
+    const encrypted = this.crypto.encryptMessage(peerId, content);
+
+    // Send via existing message protocol
+    await this.sendDirectMessage(peerId, {
+      type: 'encrypted',
+      ciphertext: encrypted,
+      from: this.peerId,
+      timestamp: Date.now()
+    });
+  }
+
+  /**
+   * Initiate key exchange with peer
+   */
+  async initiateKeyExchange(peerId) {
+    const ourPublicKey = this.crypto.initiateSession(peerId);
+
+    // Send key exchange request
+    await this.sendDirectMessage(peerId, {
+      type: 'key_exchange',
+      subtype: 'initiate',
+      publicKey: ourPublicKey,
+      identityKey: this.crypto.getPublicKey(),
+      from: this.peerId,
+      timestamp: Date.now()
+    });
+
+    // Wait for response (with timeout)
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Key exchange timeout'));
+      }, 10000);
+
+      const handler = (msg) => {
+        if (msg.type === 'key_exchange' && msg.subtype === 'response' && msg.from === peerId) {
+          clearTimeout(timeout);
+          this.off('directMessage', handler);
+          this.crypto.completeSession(peerId, msg.publicKey);
+          resolve(true);
+        }
+      };
+
+      this.on('directMessage', handler);
+    });
+  }
+
+  /**
+   * Handle incoming key exchange request
+   */
+  handleKeyExchange(message) {
+    if (message.subtype === 'initiate') {
+      // Complete our side of the exchange
+      const ourPublicKey = this.crypto.completeSession(message.from, message.publicKey);
+
+      // Send response
+      this.sendDirectMessage(message.from, {
+        type: 'key_exchange',
+        subtype: 'response',
+        publicKey: ourPublicKey,
+        identityKey: this.crypto.getPublicKey(),
+        from: this.peerId,
+        timestamp: Date.now()
+      }).catch(console.warn);
+
+      console.log(`[Crypto] Established encrypted session with ${message.from.slice(0, 16)}...`);
+    }
+  }
+
+  /**
+   * Get my registered username
+   */
+  getMyUsername() {
+    return this.registry?.myUsername || null;
+  }
+
+  /**
+   * Get identity public key (for sharing/verification)
+   */
+  getIdentityPublicKey() {
+    return this.crypto?.getPublicKey() || null;
+  }
+
+  /**
+   * Verify a message signature from a peer
+   */
+  verifyPeerSignature(data, signature, publicKey) {
+    return this.crypto.verify(data, signature, publicKey);
+  }
+
+  /**
+   * Set coordination server for faster username lookups
+   * @param {string} url - Coordination server URL (optional)
+   */
+  setCoordinationServer(url) {
+    if (this.registry) {
+      this.registry.setCoordinationServer(url);
+    }
   }
 
   async stop() {

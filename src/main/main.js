@@ -114,6 +114,65 @@ function setupIpcHandlers() {
     database.updateChatName(peerId, nickname);
   });
 
+  // ═══════════════════════════════════════════════════════════════════
+  // USERNAME REGISTRY (DHT-based, like ENS)
+  // ═══════════════════════════════════════════════════════════════════
+  
+  // Register a globally unique username
+  ipcMain.handle('registry:register', async (_, username) => {
+    try {
+      const record = await p2pNode.registerUsername(username);
+      // Also update local user store
+      const user = store.get('user') || {};
+      user.registeredUsername = username;
+      user.publicKey = record.publicKey;
+      store.set('user', user);
+      return { success: true, record };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Lookup a user by username
+  ipcMain.handle('registry:lookup', async (_, username) => {
+    try {
+      const record = await p2pNode.lookupUsername(username);
+      return { success: true, record };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Search usernames by prefix
+  ipcMain.handle('registry:search', (_, prefix) => {
+    return p2pNode.searchUsernames(prefix);
+  });
+
+  // Connect to user by username
+  ipcMain.handle('registry:connectByUsername', async (_, username) => {
+    try {
+      await p2pNode.connectByUsername(username);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Get identity info (public key, fingerprint)
+  ipcMain.handle('crypto:getIdentity', () => {
+    return {
+      publicKey: p2pNode.getIdentityPublicKey(),
+      fingerprint: p2pNode.getNodeInfo().keyFingerprint,
+      registeredUsername: p2pNode.getMyUsername()
+    };
+  });
+
+  // Set optional coordination server
+  ipcMain.handle('registry:setCoordServer', (_, url) => {
+    p2pNode.setCoordinationServer(url);
+    store.set('coordServer', url);
+  });
+
   // Groups
   ipcMain.handle('group:create', async (_, name, memberIds) => {
     const group = await database.createGroup(name, memberIds);

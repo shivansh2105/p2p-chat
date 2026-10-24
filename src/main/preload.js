@@ -46,6 +46,26 @@ contextBridge.exposeInMainWorld('api', {
     setNickname: (peerId, nickname) => ipcRenderer.invoke('contact:setNickname', peerId, nickname)
   },
 
+  // Username Registry (DHT-based, globally unique)
+  registry: {
+    // Register a unique username (3-20 chars, alphanumeric)
+    register: (username) => ipcRenderer.invoke('registry:register', username),
+    // Lookup user by username
+    lookup: (username) => ipcRenderer.invoke('registry:lookup', username),
+    // Search usernames by prefix
+    search: (prefix) => ipcRenderer.invoke('registry:search', prefix),
+    // Connect to user by username (instead of raw address)
+    connectByUsername: (username) => ipcRenderer.invoke('registry:connectByUsername', username),
+    // Set optional coordination server URL
+    setCoordServer: (url) => ipcRenderer.invoke('registry:setCoordServer', url)
+  },
+
+  // Crypto (Tailscale-inspired identity)
+  crypto: {
+    // Get identity info (public key, fingerprint, registered username)
+    getIdentity: () => ipcRenderer.invoke('crypto:getIdentity')
+  },
+
   // Groups
   group: {
     create: (name, memberIds) => ipcRenderer.invoke('group:create', name, memberIds)
