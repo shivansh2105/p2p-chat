@@ -66,6 +66,25 @@ contextBridge.exposeInMainWorld('api', {
     getIdentity: () => ipcRenderer.invoke('crypto:getIdentity')
   },
 
+  // Volunteer Relay Server (Like Tor/Bitcoin Node)
+  // Help the network by relaying traffic for others
+  relay: {
+    // Enable relay server (start helping the network)
+    enable: () => ipcRenderer.invoke('relay:enable'),
+    // Disable relay server
+    disable: () => ipcRenderer.invoke('relay:disable'),
+    // Check if relay is enabled
+    isEnabled: () => ipcRenderer.invoke('relay:isEnabled'),
+    // Get relay statistics (uptime, bytes relayed, peers helped)
+    getStats: () => ipcRenderer.invoke('relay:getStats'),
+    // Get list of known relay nodes in the network
+    getKnownRelays: () => ipcRenderer.invoke('relay:getKnownRelays'),
+    // Event: relay started helping a peer
+    onRelayHelping: (callback) => ipcRenderer.on('relay:helping', (_, data) => callback(data)),
+    // Event: relay status changed
+    onRelayStatusChanged: (callback) => ipcRenderer.on('relay:statusChanged', (_, status) => callback(status))
+  },
+
   // Groups
   group: {
     create: (name, memberIds) => ipcRenderer.invoke('group:create', name, memberIds)

@@ -54,6 +54,7 @@ const os = require('os');
 // Enhanced crypto and naming modules (Tailscale-inspired)
 const P2PCrypto = require('./crypto');
 const UsernameRegistry = require('./username-registry');
+const { RelayServer, RelayClient } = require('./relay-server');
 
 // ═══════════════════════════════════════════════════════════════════
 // FREE PUBLIC STUN SERVERS - No cost, no maintenance, no servers needed
@@ -89,6 +90,10 @@ class P2PNode extends EventEmitter {
     // Tailscale-inspired modules
     this.crypto = new P2PCrypto(this.dataDir);
     this.registry = null;  // Initialized after node starts
+    
+    // Volunteer relay server (like Tor/Bitcoin node)
+    this.relayServer = null;
+    this.relayClient = null;
   }
 
   async start() {
@@ -174,6 +179,9 @@ class P2PNode extends EventEmitter {
 
     // Initialize Tailscale-inspired crypto and naming
     await this.initializeCrypto();
+    
+    // Initialize relay server and client (volunteer node support)
+    await this.initializeRelay();
 
     // Get shareable addresses
     this.publicAddresses = this.getShareableAddresses();
@@ -820,6 +828,115 @@ class P2PNode extends EventEmitter {
     } catch (error) {
       console.error('[Crypto] Initialization failed:', error);
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // VOLUNTEER RELAY SERVER (Like Tor/Bitcoin Node)
+  // Users can opt-in to help the network by relaying traffic for others
+  // ═══════════════════════════════════════════════════════════════════
+
+  /**
+   * Initialize relay server and client
+   * Relay is enabled by default to help the network (like BitTorrent seeding)
+   */
+  async initializeRelay() {
+    try {
+      // Create relay server (volunteer mode)
+      this.relayServer = new RelayServer(this.node);
+      
+      // Create relay client (to use other relays)
+      this.relayClient = new RelayClient(this.node);
+      
+      // Setup relay event handlers
+      this.relayServer.on('enabled', () => {
+        this.emit('relayEnabled');
+      });
+      
+      this.relayServer.on('disabled', () => {
+        this.emit('relayDisabled');
+      });
+      
+      this.relayServer.on('reservation', ({ peerId }) => {
+        console.log(`[Relay] Helping peer ${peerId.slice(0, 16)}...`);
+        this.emit('relayHelping', { peerId });
+      });
+      
+      this.relayServer.on('circuitOpened', (info) => {
+        this.emit('relayCircuit', info);
+      });
+
+      // Check stored preference for relay mode
+      const relayEnabled = this.store?.get('relayEnabled', true) ?? true;
+      
+      if (relayEnabled) {
+        await this.relayServer.enable();
+      }
+
+      // Start discovering other relay nodes
+      await this.relayClient.discoverRelays();
+
+      console.log('[Relay] Relay subsystem initialized');
+      console.log(`[Relay] Volunteer mode: ${relayEnabled ? 'ENABLED' : 'DISABLED'}`);
+    } catch (error) {
+      console.error('[Relay] Initialization failed:', error);
+    }
+  }
+
+  /**
+   * Enable volunteer relay server mode
+   * This makes your PC help others connect (like Tor/Bitcoin)
+   */
+  async enableRelay() {
+    if (this.relayServer) {
+      await this.relayServer.enable();
+      this.store?.set('relayEnabled', true);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Disable volunteer relay server mode
+   */
+  async disableRelay() {
+    if (this.relayServer) {
+      await this.relayServer.disable();
+      this.store?.set('relayEnabled', false);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Check if relay server is enabled
+   */
+  isRelayEnabled() {
+    return this.relayServer?.isEnabled() ?? false;
+  }
+
+  /**
+   * Get relay server statistics
+   * Shows how much you've helped the network
+   */
+  getRelayStats() {
+    if (!this.relayServer) {
+      return {
+        enabled: false,
+        uptimeSeconds: 0,
+        totalBytesRelayed: 0,
+        totalBytesRelayedMB: '0.00',
+        peersHelped: 0,
+        currentReservations: 0
+      };
+    }
+    return this.relayServer.getStats();
+  }
+
+  /**
+   * Get list of known relay nodes in the network
+   */
+  getKnownRelays() {
+    return this.relayClient?.getKnownRelays() ?? [];
   }
 
   /**

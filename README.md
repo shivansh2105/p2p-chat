@@ -17,6 +17,43 @@ Friend: Searches "alice" → Finds you → Connects directly
 - **DHT Username Registry** — Globally unique usernames stored in the network
 - **Optional Coordination Server** — Faster lookups (works without it too)
 
+## 🌐 Volunteer Relay Nodes (Like Tor/Bitcoin)
+
+**Help the network!** Your PC can be a relay node to help others connect:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    VOLUNTEER RELAY NETWORK                       │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   User A (behind NAT)                                           │
+│       │                                                          │
+│       │ ← Can't connect directly                                │
+│       ▼                                                          │
+│   ┌──────────────────┐                                          │
+│   │  VOLUNTEER RELAY  │ ← Your PC (helping the network!)        │
+│   │  (Your PC!)       │                                          │
+│   └──────────────────┘                                          │
+│       │                                                          │
+│       │ → Forwards encrypted packets                            │
+│       ▼                                                          │
+│   User B (also behind NAT)                                      │
+│                                                                  │
+│   Privacy: All traffic END-TO-END ENCRYPTED                     │
+│   Relay cannot read messages - only forward packets             │
+│   Same model as Tor/Tailscale DERP                              │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Why run a relay?**
+- 🌍 **Strengthen the network** — More relays = better connectivity
+- 🤝 **Help friends** — Especially those behind strict firewalls/NAT
+- ⚡ **Priority routing** — Relay nodes get faster connections
+- 📊 **Track your impact** — See how many peers you've helped
+
+**Enabled by default** (like BitTorrent seeding). Turn off in Settings → Relay if needed.
+
 ## 🌐 How It Works (No Servers Required!)
 
 ```

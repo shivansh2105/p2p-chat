@@ -173,6 +173,45 @@ function setupIpcHandlers() {
     store.set('coordServer', url);
   });
 
+  // ═══════════════════════════════════════════════════════════════════
+  // VOLUNTEER RELAY SERVER (Like Tor/Bitcoin Node)
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Enable relay server (start helping the network)
+  ipcMain.handle('relay:enable', async () => {
+    try {
+      await p2pNode.enableRelay();
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Disable relay server
+  ipcMain.handle('relay:disable', async () => {
+    try {
+      await p2pNode.disableRelay();
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Check if relay is enabled
+  ipcMain.handle('relay:isEnabled', () => {
+    return p2pNode.isRelayEnabled();
+  });
+
+  // Get relay statistics (how much you've helped)
+  ipcMain.handle('relay:getStats', () => {
+    return p2pNode.getRelayStats();
+  });
+
+  // Get list of known relay nodes
+  ipcMain.handle('relay:getKnownRelays', () => {
+    return p2pNode.getKnownRelays();
+  });
+
   // Groups
   ipcMain.handle('group:create', async (_, name, memberIds) => {
     const group = await database.createGroup(name, memberIds);
