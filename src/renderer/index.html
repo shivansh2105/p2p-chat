@@ -207,6 +207,37 @@
               <input type="checkbox" id="autoBackupToggle">
             </div>
           </div>
+
+          <div class="settings-section relay-section">
+            <h3>🌐 Volunteer Relay Node</h3>
+            <p class="setting-description">Help others connect by relaying their encrypted traffic (like Tor/Bitcoin nodes)</p>
+            <div class="setting-item">
+              <label>Run as Relay Server</label>
+              <div class="toggle-switch">
+                <input type="checkbox" id="relayToggle" checked>
+                <span class="slider"></span>
+              </div>
+            </div>
+            <div class="relay-stats" id="relayStats">
+              <div class="stat-row">
+                <span class="stat-label">Status</span>
+                <span class="stat-value relay-status" id="relayStatus">● Active</span>
+              </div>
+              <div class="stat-row">
+                <span class="stat-label">Uptime</span>
+                <span class="stat-value" id="relayUptime">0h 0m</span>
+              </div>
+              <div class="stat-row">
+                <span class="stat-label">Data Relayed</span>
+                <span class="stat-value" id="relayData">0 MB</span>
+              </div>
+              <div class="stat-row">
+                <span class="stat-label">Peers Helped</span>
+                <span class="stat-value" id="relayPeersHelped">0</span>
+              </div>
+            </div>
+            <p class="setting-hint">🔒 Privacy: All traffic is end-to-end encrypted. You cannot read relayed messages.</p>
+          </div>
         </div>
       </div>
     </div>

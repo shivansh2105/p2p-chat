@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await checkUser();
   setupEventListeners();
   startNetworkStatusUpdater();
+  initializeRelay();  // Initialize volunteer relay server
 });
 
 async function checkUser() {
@@ -511,6 +512,79 @@ async function updateBackupStatus() {
     }
   } catch (error) {
     console.error('Failed to get backup status:', error);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// RELAY SERVER FUNCTIONS (Volunteer Node)
+// ═══════════════════════════════════════════════════════════════════
+
+async function initializeRelay() {
+  const toggle = document.getElementById('relayToggle');
+  if (!toggle) return;
+
+  // Load current state
+  try {
+    const isEnabled = await api.relay.isEnabled();
+    toggle.checked = isEnabled;
+    await updateRelayStats();
+  } catch (error) {
+    console.error('Failed to get relay status:', error);
+  }
+
+  // Handle toggle
+  toggle.addEventListener('change', async (e) => {
+    try {
+      if (e.target.checked) {
+        await api.relay.enable();
+        showToast('🌐 Relay enabled - Helping the network!');
+      } else {
+        await api.relay.disable();
+        showToast('Relay disabled');
+      }
+      await updateRelayStats();
+    } catch (error) {
+      console.error('Failed to toggle relay:', error);
+      e.target.checked = !e.target.checked; // Revert
+    }
+  });
+
+  // Update stats periodically
+  setInterval(updateRelayStats, 10000); // Every 10 seconds
+}
+
+async function updateRelayStats() {
+  try {
+    const stats = await api.relay.getStats();
+    
+    // Status
+    const statusEl = document.getElementById('relayStatus');
+    if (statusEl) {
+      statusEl.textContent = stats.enabled ? '● Active' : '○ Inactive';
+      statusEl.className = 'stat-value relay-status' + (stats.enabled ? '' : ' inactive');
+    }
+    
+    // Uptime
+    const uptimeEl = document.getElementById('relayUptime');
+    if (uptimeEl) {
+      const hours = Math.floor(stats.uptimeSeconds / 3600);
+      const mins = Math.floor((stats.uptimeSeconds % 3600) / 60);
+      uptimeEl.textContent = `${hours}h ${mins}m`;
+    }
+    
+    // Data relayed
+    const dataEl = document.getElementById('relayData');
+    if (dataEl) {
+      dataEl.textContent = `${stats.totalBytesRelayedMB || '0.00'} MB`;
+    }
+    
+    // Peers helped
+    const peersEl = document.getElementById('relayPeersHelped');
+    if (peersEl) {
+      peersEl.textContent = stats.peersHelped || 0;
+    }
+  } catch (error) {
+    console.error('Failed to update relay stats:', error);
   }
 }
 
