@@ -11,170 +11,288 @@
 </head>
 <body>
   <div id="app">
-    <!-- Setup Screen -->
-    <div id="setup-screen" class="screen active">
-      <div class="setup-container">
-        <div class="logo">
-          <svg viewBox="0 0 100 100" width="80" height="80">
-            <defs>
-              <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" style="stop-color:#667eea"/>
-                <stop offset="100%" style="stop-color:#764ba2"/>
-              </linearGradient>
-            </defs>
-            <circle cx="50" cy="50" r="45" fill="url(#grad)"/>
-            <path d="M30 35 Q30 25 40 25 L60 25 Q70 25 70 35 L70 50 Q70 60 60 60 L45 60 L35 70 L35 60 L40 60 Q30 60 30 50 Z" fill="white"/>
-          </svg>
-        </div>
-        <h1>P2P Chat</h1>
-        <p class="subtitle">Decentralized • Private • Serverless</p>
-        
-        <div class="input-group">
-          <label>Your Username</label>
-          <input type="text" id="username-input" placeholder="Enter your name" maxlength="30">
-        </div>
-        
-        <button id="start-btn" class="primary-btn">Start Chatting</button>
-        
-        <p class="info-text">
-          🔒 End-to-end encrypted<br>
-          🌐 No servers needed<br>
-          📱 Works peer-to-peer
-        </p>
+    <!-- Header -->
+    <header class="header">
+      <h1>P2P Chat</h1>
+      <div class="connection-status" id="connectionStatus">
+        <span class="status-dot offline"></span>
+        <span id="peerCount">0 peers</span>
       </div>
-    </div>
+    </header>
 
-    <!-- Main Chat Screen -->
-    <div id="main-screen" class="screen">
-      <!-- Chat List View -->
-      <div id="chat-list-view" class="view active">
-        <header class="app-header">
-          <h1>P2P Chat</h1>
-          <div class="header-actions">
-            <button id="new-chat-btn" class="icon-btn">
-              <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
-                <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
-              </svg>
-            </button>
-            <button id="settings-btn" class="icon-btn">
-              <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
-                <path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
-              </svg>
-            </button>
-          </div>
-        </header>
-        
-        <div id="peer-status" class="peer-status">
-          <span class="status-dot"></span>
-          <span id="peer-count">Looking for peers...</span>
-        </div>
-        
-        <div id="chat-list" class="chat-list">
-          <div class="empty-state">
-            <p>No chats yet</p>
-            <p class="hint">Tap + to connect with someone</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- Chat View -->
-      <div id="chat-view" class="view">
-        <header class="chat-header">
-          <button id="back-btn" class="icon-btn">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
-              <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
-            </svg>
-          </button>
-          <div class="chat-info">
-            <h2 id="chat-name">Chat</h2>
-            <span id="chat-status" class="chat-status">connecting...</span>
-          </div>
-        </header>
-        
-        <div id="messages" class="messages"></div>
-        
-        <div class="message-input-container">
-          <input type="text" id="message-input" placeholder="Type a message...">
-          <button id="send-btn" class="send-btn">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
-              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
-            </svg>
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- New Chat Modal -->
-    <div id="new-chat-modal" class="modal">
-      <div class="modal-content">
-        <h2>Connect to Peer</h2>
-        
-        <div class="tabs">
-          <button class="tab active" data-tab="address">Enter Address</button>
-          <button class="tab" data-tab="nearby">Nearby</button>
-        </div>
-        
-        <div id="address-tab" class="tab-content active">
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Setup Screen -->
+      <div id="setupScreen" class="screen active">
+        <div class="setup-card">
+          <h2>Welcome to P2P Chat</h2>
+          <p>Decentralized • Encrypted • Serverless</p>
+          
           <div class="input-group">
-            <label>Peer Address</label>
-            <textarea id="peer-address-input" placeholder="Paste peer's multiaddress here..."></textarea>
+            <label for="usernameInput">Your Name</label>
+            <input type="text" id="usernameInput" placeholder="Enter your name" maxlength="50">
           </div>
-          <button id="connect-peer-btn" class="primary-btn">Connect</button>
+          
+          <button class="btn primary" id="startBtn">Start Chatting</button>
         </div>
-        
-        <div id="nearby-tab" class="tab-content">
-          <div id="nearby-peers" class="nearby-peers">
-            <p class="scanning">Scanning for nearby peers...</p>
-          </div>
-        </div>
-        
-        <div class="share-section">
-          <p>Your Address:</p>
-          <div id="my-address" class="my-address">Initializing...</div>
-          <button id="copy-address-btn" class="secondary-btn">Copy Address</button>
-        </div>
-        
-        <button class="close-modal-btn" onclick="closeModal()">Cancel</button>
       </div>
-    </div>
 
-    <!-- Settings Modal -->
-    <div id="settings-modal" class="modal">
-      <div class="modal-content">
-        <h2>Settings</h2>
-        
-        <div class="input-group">
-          <label>Username</label>
-          <input type="text" id="settings-username" placeholder="Your name">
+      <!-- Connection Screen -->
+      <div id="connectionScreen" class="screen">
+        <div class="tabs">
+          <button class="tab active" data-tab="create">Create Invite</button>
+          <button class="tab" data-tab="join">Join</button>
         </div>
-        
-        <div class="setting-item">
-          <span>Notifications</span>
-          <label class="toggle">
-            <input type="checkbox" id="notifications-toggle" checked>
-            <span class="slider"></span>
-          </label>
+
+        <div class="tab-content active" id="createTab">
+          <p>Share this code with your friend:</p>
+          <div class="code-display" id="offerCode">
+            <button class="btn secondary" id="generateCodeBtn">Generate Invite Code</button>
+          </div>
+          <div id="waitingForAnswer" style="display:none;">
+            <p>Waiting for friend's response...</p>
+            <div class="input-group">
+              <label>Paste friend's response code:</label>
+              <textarea id="answerInput" rows="3" placeholder="Paste answer code here"></textarea>
+            </div>
+            <button class="btn primary" id="completeConnectionBtn">Connect</button>
+          </div>
         </div>
-        
-        <div class="setting-item">
-          <span>Auto-backup</span>
-          <label class="toggle">
-            <input type="checkbox" id="backup-toggle">
-            <span class="slider"></span>
-          </label>
+
+        <div class="tab-content" id="joinTab">
+          <div class="input-group">
+            <label>Paste invite code from friend:</label>
+            <textarea id="offerInput" rows="3" placeholder="Paste invite code here"></textarea>
+          </div>
+          <button class="btn primary" id="acceptOfferBtn">Accept Invite</button>
+          <div id="myAnswerCode" style="display:none;">
+            <p>Send this code back to your friend:</p>
+            <div class="code-display" id="answerCode"></div>
+            <button class="btn secondary" id="copyAnswerBtn">Copy Code</button>
+          </div>
         </div>
-        
-        <div class="peer-id-display">
-          <label>Your Peer ID</label>
-          <code id="my-peer-id">Loading...</code>
+
+        <div class="connected-peers" id="connectedPeers" style="display:none;">
+          <h3>Connected Peers</h3>
+          <ul id="peerList"></ul>
         </div>
-        
-        <button id="save-settings-btn" class="primary-btn">Save</button>
-        <button class="close-modal-btn" onclick="closeModal()">Close</button>
+
+        <button class="btn secondary" id="goToChatBtn" style="display:none;">Go to Chat</button>
       </div>
-    </div>
+
+      <!-- Chat Screen -->
+      <div id="chatScreen" class="screen">
+        <div class="messages" id="messages"></div>
+        
+        <div class="message-input">
+          <input type="text" id="messageInput" placeholder="Type a message...">
+          <button class="btn primary send-btn" id="sendBtn">Send</button>
+        </div>
+      </div>
+    </main>
+
+    <!-- Bottom Navigation -->
+    <nav class="bottom-nav" id="bottomNav" style="display:none;">
+      <button class="nav-item" data-screen="connectionScreen">
+        <span class="nav-icon">👥</span>
+        <span>Connect</span>
+      </button>
+      <button class="nav-item active" data-screen="chatScreen">
+        <span class="nav-icon">💬</span>
+        <span>Chat</span>
+      </button>
+    </nav>
   </div>
 
-  <script type="module" src="app.js"></script>
+  <script type="module">
+    import p2pChat from './app.js';
+
+    let currentScreen = 'setupScreen';
+
+    // Initialize
+    async function init() {
+      await p2pChat.init();
+      
+      // Setup event handlers
+      p2pChat.onMessage = (msg) => {
+        addMessageToUI(msg);
+      };
+
+      p2pChat.onPeerConnected = (peerId, username) => {
+        updatePeerList();
+        showNotification(`${username} connected!`);
+      };
+
+      p2pChat.onPeerDisconnected = (peerId) => {
+        updatePeerList();
+      };
+
+      // Load existing messages
+      p2pChat.messages.forEach(msg => addMessageToUI(msg));
+
+      // Check if username already set
+      if (p2pChat.username && p2pChat.username !== 'Anonymous') {
+        document.getElementById('usernameInput').value = p2pChat.username;
+      }
+
+      setupEventListeners();
+    }
+
+    function setupEventListeners() {
+      // Start button
+      document.getElementById('startBtn').onclick = async () => {
+        const username = document.getElementById('usernameInput').value.trim();
+        if (!username) {
+          alert('Please enter your name');
+          return;
+        }
+        await p2pChat.setUsername(username);
+        showScreen('connectionScreen');
+        document.getElementById('bottomNav').style.display = 'flex';
+      };
+
+      // Tabs
+      document.querySelectorAll('.tab').forEach(tab => {
+        tab.onclick = () => {
+          document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+          document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+          tab.classList.add('active');
+          document.getElementById(tab.dataset.tab + 'Tab').classList.add('active');
+        };
+      });
+
+      // Generate invite code
+      document.getElementById('generateCodeBtn').onclick = async () => {
+        const code = await p2pChat.createConnectionOffer();
+        document.getElementById('offerCode').innerHTML = `
+          <textarea readonly rows="4">${code}</textarea>
+          <button class="btn secondary" onclick="navigator.clipboard.writeText('${code}')">Copy</button>
+        `;
+        document.getElementById('waitingForAnswer').style.display = 'block';
+      };
+
+      // Complete connection with answer
+      document.getElementById('completeConnectionBtn').onclick = async () => {
+        const answer = document.getElementById('answerInput').value.trim();
+        if (!answer) return;
+        try {
+          await p2pChat.completeConnection(answer);
+          showNotification('Connected!');
+          updatePeerList();
+          document.getElementById('goToChatBtn').style.display = 'block';
+        } catch (e) {
+          alert('Invalid code: ' + e.message);
+        }
+      };
+
+      // Accept offer
+      document.getElementById('acceptOfferBtn').onclick = async () => {
+        const offer = document.getElementById('offerInput').value.trim();
+        if (!offer) return;
+        try {
+          const answerCode = await p2pChat.acceptConnectionOffer(offer);
+          document.getElementById('answerCode').innerHTML = `
+            <textarea readonly rows="4">${answerCode}</textarea>
+          `;
+          document.getElementById('myAnswerCode').style.display = 'block';
+          document.getElementById('copyAnswerBtn').onclick = () => {
+            navigator.clipboard.writeText(answerCode);
+            showNotification('Copied!');
+          };
+          updatePeerList();
+          document.getElementById('goToChatBtn').style.display = 'block';
+        } catch (e) {
+          alert('Invalid code: ' + e.message);
+        }
+      };
+
+      // Go to chat
+      document.getElementById('goToChatBtn').onclick = () => {
+        showScreen('chatScreen');
+      };
+
+      // Send message
+      document.getElementById('sendBtn').onclick = sendMessage;
+      document.getElementById('messageInput').onkeypress = (e) => {
+        if (e.key === 'Enter') sendMessage();
+      };
+
+      // Bottom nav
+      document.querySelectorAll('.nav-item').forEach(item => {
+        item.onclick = () => {
+          document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+          item.classList.add('active');
+          showScreen(item.dataset.screen);
+        };
+      });
+    }
+
+    async function sendMessage() {
+      const input = document.getElementById('messageInput');
+      const content = input.value.trim();
+      if (!content) return;
+
+      try {
+        const msg = await p2pChat.sendMessage(content);
+        addMessageToUI(msg);
+        input.value = '';
+      } catch (e) {
+        alert('Failed to send: ' + e.message);
+      }
+    }
+
+    function addMessageToUI(msg) {
+      const container = document.getElementById('messages');
+      const isOwn = msg.from === p2pChat.peerId;
+      
+      const div = document.createElement('div');
+      div.className = `message ${isOwn ? 'own' : 'other'}`;
+      div.innerHTML = `
+        <div class="message-header">
+          <span class="username">${escapeHtml(msg.fromUsername || 'Unknown')}</span>
+          <span class="time">${new Date(msg.timestamp).toLocaleTimeString()}</span>
+        </div>
+        <div class="message-content">${escapeHtml(msg.content)}</div>
+      `;
+      container.appendChild(div);
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function updatePeerList() {
+      const peers = p2pChat.getConnectedPeers();
+      const count = peers.length;
+      
+      document.getElementById('peerCount').textContent = `${count} peer${count !== 1 ? 's' : ''}`;
+      document.querySelector('.status-dot').className = `status-dot ${count > 0 ? 'online' : 'offline'}`;
+      
+      const list = document.getElementById('peerList');
+      list.innerHTML = peers.map(p => `<li>${escapeHtml(p.username)}</li>`).join('');
+      
+      document.getElementById('connectedPeers').style.display = count > 0 ? 'block' : 'none';
+    }
+
+    function showScreen(screenId) {
+      document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+      document.getElementById(screenId).classList.add('active');
+      currentScreen = screenId;
+    }
+
+    function showNotification(text) {
+      // Simple toast notification
+      const toast = document.createElement('div');
+      toast.className = 'toast';
+      toast.textContent = text;
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 3000);
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    init();
+  </script>
 </body>
 </html>
