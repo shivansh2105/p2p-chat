@@ -44,6 +44,9 @@ const { identify } = require('@libp2p/identify');
 const { kadDHT } = require('@libp2p/kad-dht');
 const { gossipsub } = require('@chainsafe/libp2p-gossipsub');
 const { mdns } = require('@libp2p/mdns');
+const { circuitRelayTransport, circuitRelayServer } = require('@libp2p/circuit-relay-v2');
+const { autoNAT } = require('@libp2p/autonat');
+const { dcutr } = require('@libp2p/dcutr');
 const { multiaddr } = require('@multiformats/multiaddr');
 const { fromString, toString } = require('uint8arrays');
 const crypto = require('crypto');
@@ -113,17 +116,39 @@ class P2PNode extends EventEmitter {
       addresses: {
         listen: [
           '/ip4/0.0.0.0/tcp/0',              // TCP - works on any port
-          '/ip4/0.0.0.0/tcp/0/ws'             // WebSocket - browser compatible
+          '/ip4/0.0.0.0/tcp/0/ws',           // WebSocket - browser compatible
+          '/p2p-circuit'                      // Listen via relay (for NAT traversal)
         ]
       },
       transports: [
         tcp(),
-        webSockets()
+        webSockets(),
+        circuitRelayTransport({             // Connect THROUGH other peers
+          discoverRelays: 2                 // Find 2 relay nodes
+        })
       ],
       connectionEncryption: [noise()],
       streamMuxers: [yamux()],
       services: {
         identify: identify(),
+        
+        // ═══════════════════════════════════════════════════════════
+        // CIRCUIT RELAY - NAT TRAVERSAL (Critical for P2P behind NAT)
+        // Allows peers behind NAT to connect through relay peers
+        // ═══════════════════════════════════════════════════════════
+        relay: circuitRelayServer({
+          reservations: {
+            maxReservations: 128,           // How many peers we relay for
+            reservationTtl: 60 * 60 * 1000, // 1 hour reservation
+            defaultDataLimit: BigInt(1024 * 1024 * 10) // 10MB per reservation
+          }
+        }),
+        
+        // Auto-detect NAT status
+        autonat: autoNAT(),
+        
+        // Direct Connection Upgrade - hole punching after relay connect
+        dcutr: dcutr(),
         
         // ═══════════════════════════════════════════════════════════
         // KADEMLIA DHT - Heart of serverless peer discovery
