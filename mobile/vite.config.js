@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'path';
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   root: 'src',
   build: {
     outDir: '../dist',
@@ -10,8 +10,8 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'src/index.html'),
-        // browser interop test page, only built with E2E=1 (not shipped in the APK)
-        ...(process.env.E2E ? { e2e: resolve(__dirname, 'src/e2e.html') } : {})
+        // browser interop test page, only built with --mode e2e (not shipped in the APK)
+        ...(mode === 'e2e' ? { e2e: resolve(__dirname, 'src/e2e.html') } : {})
       }
     }
   },
@@ -19,4 +19,4 @@ export default defineConfig({
   server: {
     port: 3000,
   },
-});
+}));

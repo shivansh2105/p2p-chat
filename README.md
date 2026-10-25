@@ -12,7 +12,7 @@ Chat and video sharing with **no central server**, built like BitTorrent: every 
 | 🔍 | **Network-wide search** | Find videos by title or tag across the whole network, not just your contacts |
 | 🌱 | **Every viewer seeds** | Watching a video makes you a seeder. Desktop streams while downloading (playback starts after the first chunks), pulling from many seeders in parallel |
 | 🧹 | **Smart cleanup** | Your copy is deleted only if your disk is >90% of quota and ≥10 other PCs are confirmed live seeders, or ≥25 are and you haven't watched it in 7 days |
-| 🔗 | **Works behind NAT** | UPnP opens a port on home routers, IPv6 needs no NAT, otherwise relay via another PC → hole punching. Falls back to public IPFS relays when no app user can relay |
+| 🔗 | **Works behind any NAT, free** | Each PC gets a free public address via a Cloudflare Quick Tunnel (no account), so even strict-NAT/CGNAT PCs become reachable relays. Plus UPnP, IPv6, hole punching, and public IPFS relays |
 | 🙋 | **Usernames** | Find people by @username via the DHT |
 | 📱 | **Phone + PC, one network** | The Android app runs libp2p in the WebView. It joins PCs over WebSocket, reaches the rest via their relays, and uses WebRTC + TURN between phones |
 | ☁️ | **Google Drive backup** | Optional, encrypted |
@@ -97,7 +97,8 @@ cd android && ./gradlew assembleDebug
 
 - **The phone needs one PC address to join.** The first time, paste a PC's address (Network tab). After that, the rest of the network is found automatically. Phones seed only while the app is open.
 - **No video compression.** Videos are stored at their original size.
-- **Strict NAT on both sides** (common on mobile data): video then needs an app user's PC with an open port to relay. Public relays only carry small amounts of data (~128 KB / 2 min).
+- **Free tunnels are best-effort.** Cloudflare Quick Tunnels need no account but have no SLA, allow up to 200 in-flight requests per PC, and the address changes on restart (it's re-announced automatically). `cloudflared` is downloaded from Cloudflare's GitHub releases on first use. Turn it off with the relay setting.
+- **Phones-only networks.** Two phones on strict NAT with no app PC online anywhere still can't reach each other, because phones can't run tunnels. One desktop app online, even behind strict NAT, is enough.
 - **DHT metadata is public.** Anyone can see who seeds a video and that someone holds mail for a given Peer ID. Message contents stay private.
 - **Uploader names on videos aren't signed yet.** Video content is still verified by hash.
 

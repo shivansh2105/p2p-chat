@@ -7,7 +7,7 @@ const { P2PNode } = require('../src/main/p2p-node');
 (async () => {
   const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'p2p-desk-'));
   const store = { m: new Map(), get(k, d) { return this.m.has(k) ? this.m.get(k) : d; }, set(k, v) { this.m.set(k, v); }, delete(k) { this.m.delete(k); } };
-  store.set('user', { username: 'desktop' }); store.set('bootstrap', false); store.set('mdns', false); store.set('upnp', false);
+  store.set('user', { username: 'desktop' }); store.set('bootstrap', false); store.set('mdns', false); store.set('upnp', false); store.set('tunnel', process.env.TUNNEL === '1');
   const n = new P2PNode({ async addMessage() {}, getMessagesSince() { return []; }, updateContactUsername() {} }, store, dir);
   await n.start();
 
@@ -23,7 +23,7 @@ const { P2PNode } = require('../src/main/p2p-node');
 
   const out = path.join(process.env.TMPDIR || os.tmpdir(), 'mobile-peer.json');
   const ws = n.node.getMultiaddrs().map(String).find((a) => a.startsWith('/ip4/127.0.0.1/') && a.includes('/ws/'));
-  const state = () => ({ ws, peerId: n.peerId, videos: n.videoStore.getSeedingVideos().map((v) => ({ id: v.id, title: v.title, ok: n.videoStore.verifyComplete(v.id) })) });
+  const state = () => ({ ws, tunnel: n.tunnel?.addr || null, peerId: n.peerId, videos: n.videoStore.getSeedingVideos().map((v) => ({ id: v.id, title: v.title, ok: n.videoStore.verifyComplete(v.id) })) });
   fs.writeFileSync(out, JSON.stringify(state()));
   setInterval(() => fs.writeFileSync(out, JSON.stringify(state())), 1000);
   console.log('WS_ADDR=' + ws);

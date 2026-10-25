@@ -256,6 +256,18 @@ class P2PNode extends EventEmitter {
     const rawDial = this.node.dial.bind(this.node);
     this.node.handle = (proto, handler, opts = {}) =>
       rawHandle(proto, handler, { runOnLimitedConnection: true, ...opts });
+    // Retry when a stream dies while opening because the connection under it
+    // is being replaced (DCUtR upgrades relay → direct and closes the relay link)
+    const openStream = async (peer, proto, opts) => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await rawDialProtocol(peer, proto, opts);
+        } catch (e) {
+          if (attempt >= 2 || opts.signal?.aborted || !/closed|reset|during opening|EOF/i.test(e.message)) throw e;
+          await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+        }
+      }
+    };
     this.node.dialProtocol = async (peer, proto, opts = {}) => {
       const { preferDirect, ...rest } = opts;
       if (preferDirect) {
@@ -267,7 +279,7 @@ class P2PNode extends EventEmitter {
           });
         } catch (e) { /* only a relayed path exists → fall through */ }
       }
-      return rawDialProtocol(toPeer(peer), proto, { runOnLimitedConnection: true, ...rest });
+      return openStream(toPeer(peer), proto, { runOnLimitedConnection: true, ...rest });
     };
     this.node.dial = (peer, opts) => rawDial(toPeer(peer), opts);
 
@@ -306,6 +318,14 @@ class P2PNode extends EventEmitter {
     
     // Initialize video protocol (P2P YouTube-style sharing)
     await this.initializeVideoProtocol();
+
+    // Free public reachability (Cloudflare Quick Tunnel, no account): makes this
+    // PC reachable + a relay even behind strict NAT/CGNAT. Background, opt-out.
+    if ((this.store?.get('relayEnabled', true) ?? true) && (this.store?.get('tunnel', true) ?? true)) {
+      const { TunnelManager } = require('./tunnel');
+      this.tunnel = new TunnelManager(this);
+      this.tunnel.start().catch((e) => console.log('[Tunnel] unavailable:', e.message));
+    }
 
     // Get shareable addresses
     this.publicAddresses = this.getShareableAddresses();
@@ -893,6 +913,8 @@ class P2PNode extends EventEmitter {
   getShareableAddresses() {
     const addrs = this.node.getMultiaddrs();
     const shareable = [];
+    // Public tunnel address works from anywhere (any NAT) — list it first
+    if (this.tunnel?.addr) shareable.push(this.tunnel.addr);
 
     // Get local IPs
     const interfaces = os.networkInterfaces();
@@ -1044,6 +1066,11 @@ class P2PNode extends EventEmitter {
     if (this.relayServer) {
       await this.relayServer.enable();
       this.store?.set('relayEnabled', true);
+      if ((this.store?.get('tunnel', true) ?? true) && !this.tunnel?.proc) {
+        const { TunnelManager } = require('./tunnel');
+        this.tunnel ||= new TunnelManager(this);
+        this.tunnel.start().catch(() => {});
+      }
       return true;
     }
     return false;
@@ -1056,6 +1083,7 @@ class P2PNode extends EventEmitter {
     if (this.relayServer) {
       await this.relayServer.disable();
       this.store?.set('relayEnabled', false);
+      this.tunnel?.stop(); // public tunnel is part of volunteering
       return true;
     }
     return false;
@@ -1427,6 +1455,7 @@ class P2PNode extends EventEmitter {
   }
 
   async stop() {
+    this.tunnel?.stop();
     this.discovery?.stop();
     this.inbox?.stopPolling();
     if (this.evictionTimer) clearInterval(this.evictionTimer);

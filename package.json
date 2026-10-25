@@ -13,7 +13,8 @@
     "build:mac": "electron-builder --mac --publish never",
     "build:linux": "electron-builder --linux --publish never",
     "test": "node test/smoke.js --offline && node test/smoke.js --video && node test/smoke-relay.js && node test/smoke-swarm.js",
-    "probe:internet": "node test/probe-bootstrap.js && node test/probe-public-relay.js && node test/probe-nat.js"
+    "probe:internet": "node test/probe-bootstrap.js && node test/probe-public-relay.js && node test/probe-nat.js",
+    "probe:tunnel": "node test/probe-tunnel.js"
   },
   "build": {
     "appId": "com.p2pchat.app",

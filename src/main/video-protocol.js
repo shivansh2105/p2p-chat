@@ -159,7 +159,11 @@ class VideoProtocol extends EventEmitter {
     return true;
   }
 
-  async sendSync(peerId, body) {
+  sendSync(peerId, body) {
+    return this.withRetry(() => this._sendSync(peerId, body));
+  }
+
+  async _sendSync(peerId, body) {
     const stream = await this.node.dialProtocol(peerId, VIDEO_SYNC_PROTOCOL, { preferDirect: true, signal: AbortSignal.timeout(60000) });
     await stream.sink([Buffer.from(JSON.stringify(body))]);
     const chunks = [];
@@ -527,7 +531,20 @@ class VideoProtocol extends EventEmitter {
   /**
    * Send request to peer
    */
-  async sendRequest(peerId, request, timeout = 30000) {
+  /** One retry when a stream dies because the connection was just upgraded (relay → direct) */
+  async withRetry(fn) {
+    try { return await fn(); } catch (e) {
+      if (!/closed|reset|opening|EOF/i.test(e.message)) throw e;
+      await new Promise((r) => setTimeout(r, 300));
+      return fn();
+    }
+  }
+
+  sendRequest(peerId, request, timeout = 30000) {
+    return this.withRetry(() => this._sendRequest(peerId, request, timeout));
+  }
+
+  async _sendRequest(peerId, request, timeout = 30000) {
     const signal = AbortSignal.timeout(timeout);
     const stream = await this.node.dialProtocol(peerId, VIDEO_PROTOCOL, { preferDirect: true, signal });
     const abort = () => stream.abort?.(new Error('request timed out'));
