@@ -1,0 +1,4 @@
+# Linux-run files must keep LF endings even when committed from Windows
+*.sh        text eol=lf
+Dockerfile  text eol=lf
+*.service   text eol=lf

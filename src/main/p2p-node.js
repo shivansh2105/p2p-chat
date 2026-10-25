@@ -140,7 +140,9 @@ class P2PNode extends EventEmitter {
           `/ip6/::/tcp/${ports.tcp6 || 0}`,
           `/ip6/::/tcp/${ports.ws6 || 0}/ws`,
           '/p2p-circuit'                      // Listen via relay (for NAT traversal)
-        ]
+        ],
+        // Servers with a public IP/domain announce it explicitly (headless mode --public-ip)
+        appendAnnounce: this.store?.get('announceAddrs', []) || []
       },
       // Don't fail startup if IPv6 (or any one listener) isn't available
       transportManager: { faultTolerance: 1 /* FaultTolerance.NO_FATAL */ },
@@ -160,13 +162,13 @@ class P2PNode extends EventEmitter {
         // ═══════════════════════════════════════════════════════════
         relay: circuitRelayServer({
           reservations: {
-            maxReservations: 128,           // How many peers we relay for
+            maxReservations: this.store?.get('relayMaxReservations', 128) ?? 128, // peers we relay for (servers: more)
             reservationTtl: 60 * 60 * 1000, // 1 hour reservation
             // Per relayed connection. 10MB default would cut off video replicas;
             // DCUtR upgrades to direct when hole punching works, so this only
             // caps the worst case (both peers behind symmetric NAT).
-            defaultDataLimit: BigInt(256 * 1024 * 1024),   // 256MB
-            defaultDurationLimit: 30 * 60 * 1000             // 30 min
+            defaultDataLimit: BigInt((this.store?.get('relayDataLimitMB', 256) ?? 256) * 1024 * 1024),
+            defaultDurationLimit: (this.store?.get('relayDurationMin', 30) ?? 30) * 60 * 1000
           }
         }),
         
@@ -228,14 +230,16 @@ class P2PNode extends EventEmitter {
           serviceTag: 'p2p-chat.local'
         })] : []),
         // Bootstrap from public libp2p nodes (for internet discovery)
-        ...((this.store?.get('bootstrap', true) ?? true)
-          ? [bootstrap({ list: BOOTSTRAP_NODES, timeout: 3000 })]
+        // Public libp2p nodes + the project's always-on servers (servers.js)
+        // + any extra entries configured on this node
+        ...((this.store?.get('bootstrap', true) ?? true) || (this.store?.get('extraBootstrap', []) || []).length
+          ? [bootstrap({ list: this.bootstrapList(), timeout: 3000 })]
           : [])
       ],
       
       connectionManager: {
         minConnections: 3,
-        maxConnections: 300,   // public DHT uses many; too low prunes relay links
+        maxConnections: this.store?.get('maxConnections', 300) ?? 300,   // public DHT uses many; too low prunes relay links
         autoDialInterval: 30000
       }
     });
@@ -954,6 +958,19 @@ class P2PNode extends EventEmitter {
 
   getConnectedPeers() {
     return Array.from(this.connectedPeers.values());
+  }
+
+  /** Bootstrap = public libp2p nodes + project servers + per-node extras */
+  bootstrapList() {
+    const { SERVERS } = require('./servers');
+    const usePublic = this.store?.get('bootstrap', true) ?? true;
+    const list = [
+      ...(usePublic ? BOOTSTRAP_NODES : []),
+      ...(usePublic ? SERVERS : []),
+      ...(this.store?.get('extraBootstrap', []) || [])
+    ];
+    const self = this.node?.peerId?.toString();
+    return [...new Set(list)].filter((a) => !self || !a.endsWith(self));
   }
 
   /**

@@ -1,0 +1,32 @@
+[Unit]
+Description=P2P Chat headless server (relay, storage, seeder)
+Documentation=https://github.com/shivansh2105/p2p-chat/blob/master/deploy/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=p2pchat
+Group=p2pchat
+EnvironmentFile=/etc/p2p-chat.env
+WorkingDirectory=/opt/p2p-chat
+ExecStart=/usr/bin/node /opt/p2p-chat/src/server/index.js
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+LimitNOFILE=65536
+
+# Hardening: the node only needs its data dir and the network
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/p2p-chat
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

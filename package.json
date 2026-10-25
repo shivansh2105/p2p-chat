@@ -12,10 +12,11 @@
     "build:win": "electron-builder --win --x64 --publish never",
     "build:mac": "electron-builder --mac --publish never",
     "build:linux": "electron-builder --linux --publish never",
-    "test": "node test/smoke.js --offline && node test/smoke.js --video && node test/smoke-relay.js && node test/smoke-swarm.js && node test/smoke-torrent.js",
+    "test": "node test/smoke.js --offline && node test/smoke.js --video && node test/smoke-relay.js && node test/smoke-swarm.js && node test/smoke-torrent.js && node test/smoke-server.js",
     "probe:internet": "node test/probe-bootstrap.js && node test/probe-public-relay.js && node test/probe-nat.js",
     "probe:tunnel": "node test/probe-tunnel.js",
-    "probe:magnet": "node test/probe-magnet.mjs"
+    "probe:magnet": "node test/probe-magnet.mjs",
+    "server": "node src/server/index.js"
   },
   "build": {
     "appId": "com.p2pchat.app",
@@ -86,5 +87,8 @@
     "utp-native": "$utp-native",
     "uint8-util": "2.2.6",
     "ip-set": "$ip-set"
+  },
+  "engines": {
+    "node": ">=20.18"
   }
 }

@@ -21,7 +21,18 @@ jobs:
           cache: 'npm'
       - run: npm ci --ignore-scripts
       - run: npm test
-        timeout-minutes: 10
+        timeout-minutes: 20
+
+  server-docker:
+    # Headless server image builds and reports healthy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t p2p-chat-server .
+      - run: |
+          docker run -d --name srv -p 8080:8080 -e P2P_PUBLIC_DHT=off -e P2P_TUNNEL=off -e P2P_UPNP=off p2p-chat-server
+          for i in $(seq 1 30); do curl -fsS localhost:8080/health && exit 0; sleep 2; done
+          docker logs srv; exit 1
 
   build-windows:
     runs-on: windows-latest

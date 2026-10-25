@@ -23,6 +23,7 @@ import { sha256 as mfSha256 } from 'multiformats/hashes/sha2';
 import { sha256 } from '@noble/hashes/sha256';
 import { WebCrypto, b64, unb64, toHex } from './crypto-web.js';
 import { idb } from './idb.js';
+import { SERVERS } from './servers.js';
 
 export const PROTO = {
   MESSAGE: '/p2p-chat/message/1.0.0',
@@ -109,7 +110,8 @@ export class MobileNode extends EventTarget {
 
     await this.node.start();
     this.peerId = this.node.peerId.toString();
-    for (const a of this.knownAddrs) this.dial(a).catch(() => {});
+    // Project servers first, then PCs we've used before
+    for (const a of [...SERVERS, ...this.knownAddrs]) this.dial(a).catch(() => {});
     return this;
   }
 

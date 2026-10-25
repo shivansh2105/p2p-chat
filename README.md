@@ -43,6 +43,16 @@ Upload ─► your PC + 3 copies ─► you go offline ─► others still find 
 | Message encryption | X25519 + HKDF + AES-256-GCM, Ed25519 signatures |
 | Storage | electron-store (JSON) + chunk files on disk |
 
+## Servers (optional, recommended)
+
+Run an always-on **headless node** (relay + storage + seeder) on any VPS, old PC or Raspberry Pi:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/shivansh2105/p2p-chat/master/deploy/install.sh | sudo bash
+```
+
+Or use `docker build -t p2p-chat-server .`, or `npm run server`. Add its address to `src/main/servers.js` / `mobile/src/servers.js` so every install connects to it first. The network still works without servers. See **[deploy/README.md](deploy/README.md)**.
+
 ## Download
 
 - **Windows / macOS / Linux / Android:** go to [Actions](https://github.com/shivansh2105/p2p-chat/actions), open the latest green run, and download from **Artifacts**.
@@ -55,8 +65,9 @@ See [INSTALL.md](INSTALL.md) for install steps.
 ```bash
 npm install
 npm start               # run the desktop app
-npm test                # 53 end-to-end tests: chat, offline mail, video swarm,
-                        # relay-only links, safe eviction, BitTorrent interop + fail-safety
+npm test                # 65 end-to-end tests: chat, offline mail, video swarm, relay-only
+                        # links, safe eviction, BitTorrent interop + fail-safety, headless server
+npm run server          # run a headless always-on node
 npm run probe:internet  # check public relays / hole punching from your network
 npm run probe:magnet -- "<magnet>"  # standard torrent client fetches an app video
 ```
