@@ -18,9 +18,9 @@
     "productName": "P2P Chat",
     "directories": {"output": "dist"},
     "files": ["src/**/*", "package.json"],
-    "win": {"target": ["portable"], "icon": "assets/icon.png"},
-    "mac": {"target": ["zip"], "icon": "assets/icon.png"},
-    "linux": {"target": ["AppImage"], "icon": "assets/icon.png"}
+    "win": {"target": ["portable"]},
+    "mac": {"target": ["zip"]},
+    "linux": {"target": ["AppImage"]}
   },
   "dependencies": {
     "electron-store": "^8.2.0",
