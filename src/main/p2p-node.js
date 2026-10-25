@@ -47,7 +47,16 @@ const { mdns } = require('@libp2p/mdns');
 const { circuitRelayTransport, circuitRelayServer } = require('@libp2p/circuit-relay-v2');
 const { autoNAT } = require('@libp2p/autonat');
 const { dcutr } = require('@libp2p/dcutr');
+const { bootstrap } = require('@libp2p/bootstrap');
 const { multiaddr } = require('@multiformats/multiaddr');
+
+// Public libp2p bootstrap nodes (for initial peer discovery)
+const BOOTSTRAP_NODES = [
+  '/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN',
+  '/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa',
+  '/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb',
+  '/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt'
+];
 const { fromString, toString } = require('uint8arrays');
 const crypto = require('crypto');
 const EventEmitter = require('events');
@@ -190,6 +199,11 @@ class P2PNode extends EventEmitter {
           interval: 10000,
           broadcast: true,
           serviceTag: 'p2p-chat.local'
+        }),
+        // Bootstrap from public libp2p nodes (for internet discovery)
+        bootstrap({
+          list: BOOTSTRAP_NODES,
+          timeout: 3000
         })
       ],
       
