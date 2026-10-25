@@ -110,7 +110,7 @@ class P2PNode extends EventEmitter {
 
     const {
       createLibp2p, tcp, webSockets, noise, yamux, identify, kadDHT, gossipsub, mdns,
-      circuitRelayTransport, circuitRelayServer, autoNAT, dcutr, bootstrap, passthroughMapper
+      circuitRelayTransport, circuitRelayServer, autoNAT, dcutr, bootstrap, passthroughMapper, uPnPNAT
     } = await loadEsm();
 
     // Persistent libp2p identity → same Peer ID across restarts
@@ -131,9 +131,15 @@ class P2PNode extends EventEmitter {
         listen: [
           '/ip4/0.0.0.0/tcp/0',              // TCP - works on any port
           '/ip4/0.0.0.0/tcp/0/ws',           // WebSocket - browser compatible
+          // IPv6: many ISPs/mobile carriers (e.g. Jio) give public IPv6 with
+          // NO NAT → direct connections even when IPv4 is behind CGNAT
+          '/ip6/::/tcp/0',
+          '/ip6/::/tcp/0/ws',
           '/p2p-circuit'                      // Listen via relay (for NAT traversal)
         ]
       },
+      // Don't fail startup if IPv6 (or any one listener) isn't available
+      transportManager: { faultTolerance: 1 /* FaultTolerance.NO_FATAL */ },
       transports: [
         tcp(),
         webSockets(),
@@ -162,6 +168,13 @@ class P2PNode extends EventEmitter {
         
         // Auto-detect NAT status
         autonat: autoNAT(),
+
+        // UPnP / NAT-PMP: ask the home router to open a port (like torrent
+        // clients) so this PC becomes connectable and can relay/seed for
+        // strict-NAT users. On by default, opt-out with store 'upnp' = false.
+        ...((this.store?.get('upnp', true) ?? true)
+          ? { upnp: uPnPNAT({ portMappingDescription: 'P2P Chat', portMappingTTL: 3600 * 1000 }) }
+          : {}),
         
         // Direct Connection Upgrade - hole punching after relay connect
         dcutr: dcutr(),
@@ -239,8 +252,19 @@ class P2PNode extends EventEmitter {
     const rawDial = this.node.dial.bind(this.node);
     this.node.handle = (proto, handler, opts = {}) =>
       rawHandle(proto, handler, { runOnLimitedConnection: true, ...opts });
-    this.node.dialProtocol = (peer, proto, opts = {}) =>
-      rawDialProtocol(toPeer(peer), proto, { runOnLimitedConnection: true, ...opts });
+    this.node.dialProtocol = async (peer, proto, opts = {}) => {
+      const { preferDirect, ...rest } = opts;
+      if (preferDirect) {
+        // Bulk data (video): a relayed link may be capped (public relays: ~128KB),
+        // so try a direct/unlimited connection first (libp2p will dial or hole-punch)
+        try {
+          return await rawDialProtocol(toPeer(peer), proto, {
+            ...rest, runOnLimitedConnection: false, signal: AbortSignal.timeout(10000)
+          });
+        } catch (e) { /* only a relayed path exists → fall through */ }
+      }
+      return rawDialProtocol(toPeer(peer), proto, { runOnLimitedConnection: true, ...rest });
+    };
     this.node.dial = (peer, opts) => rawDial(toPeer(peer), opts);
 
     // Setup
@@ -1092,16 +1116,21 @@ class P2PNode extends EventEmitter {
     const candidates = (await this.getAppPeers(VIDEO_SYNC_PROTOCOL))
       .filter((id) => !done.has(id));
 
-    for (const peerId of candidates) {
-      if (done.size >= target) break;
-      try {
-        await this.videoProtocol.replicateTo(peerId, video);
-        done.add(peerId);
-        console.log(`[Video] "${video.title}" replicated to ${peerId.slice(-8)} (${done.size}/${target})`);
-      } catch (e) {
-        console.log(`[Video] ${peerId.slice(-8)} declined replica: ${e.message}`);
+    // Push to several PCs in parallel; extra candidates fill in for refusals
+    let next = 0;
+    const worker = async () => {
+      while (done.size < target && next < candidates.length) {
+        const peerId = candidates[next++];
+        try {
+          await this.videoProtocol.replicateTo(peerId, video);
+          done.add(peerId);
+          console.log(`[Video] "${video.title}" replicated to ${peerId.slice(-8)} (${done.size}/${target})`);
+        } catch (e) {
+          console.log(`[Video] ${peerId.slice(-8)} declined replica: ${e.message}`);
+        }
       }
-    }
+    };
+    await Promise.all(Array.from({ length: Math.min(target - done.size, candidates.length) }, worker));
 
     video.replicas = [...done];
     this.videoStore.saveIndex();

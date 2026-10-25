@@ -82,11 +82,12 @@ async function link(x, y) {
   ok('B evicts its copy because C + D still seed it', evicted.some((e) => e.id === video.id) && B.videoStore.getMissingChunks(video.id).length > 0);
   ok('video still complete on C and D', C.videoStore.verifyComplete(video.id) && D.videoStore.verifyComplete(video.id));
 
-  // C should NOT evict: only D left as another full copy (< safeCopies 2)
-  C.store.set('storageQuotaMB', 2); C.store.set('videoSafeCopies', 2); C.store.set('videoProtectMs', 0);
+  // DHT still lists A (offline) and B (evicted) as seeders → 4 records, but only
+  // D and E (A's 3rd replica) are LIVE. With safeCopies = 3, C must keep its copy.
+  C.store.set('storageQuotaMB', 2); C.store.set('videoSafeCopies', 3); C.store.set('videoProtectMs', 0);
   await sleep(500);
   const ev2 = await C.videoProtocol.evictionPass();
-  ok('C keeps its copy: stale DHT records ignored, only D is a live seeder', !ev2.some((e) => e.id === video.id) && C.videoStore.verifyComplete(video.id));
+  ok('C keeps its copy: stale DHT records (A offline, B evicted) not counted', !ev2.some((e) => e.id === video.id) && C.videoStore.verifyComplete(video.id));
 
   // ── Offline mail found via DHT ──
   const X = mk('X'), Y = mk('Y');

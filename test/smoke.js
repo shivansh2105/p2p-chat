@@ -34,7 +34,7 @@ function makeNode(name) {
   const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), `p2p-${name}-`));
   const store = new MemStore();
   store.set('user', { username: name });
-  store.set('autoBootstrap', false);
+  store.set('bootstrap', false); // local test: public network covered by probe:internet
   return new P2PNode(new MemDb(), store, dir);
 }
 

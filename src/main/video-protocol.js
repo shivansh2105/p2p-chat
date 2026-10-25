@@ -145,18 +145,22 @@ class VideoProtocol extends EventEmitter {
     }});
     if (!meta.ok) throw new Error(meta.error || 'rejected');
     const have = new Set(meta.have || []);
-    for (const hash of video.chunkHashes) {
-      if (have.has(hash)) continue;
-      const data = this.videoStore.getChunk(hash);
-      if (!data) continue;
-      const r = await this.sendSync(peerId, { type: 'VIDEO_CHUNK', videoId: video.id, chunkHash: hash, data: data.toString('base64') });
-      if (!r.ok) throw new Error(r.error || 'chunk rejected');
-    }
+    const queue = video.chunkHashes.filter((h) => !have.has(h));
+    const sendNext = async () => {
+      while (queue.length) {
+        const hash = queue.shift();
+        const data = this.videoStore.getChunk(hash);
+        if (!data) continue;
+        const r = await this.sendSync(peerId, { type: 'VIDEO_CHUNK', videoId: video.id, chunkHash: hash, data: data.toString('base64') });
+        if (!r.ok) throw new Error(r.error || 'chunk rejected');
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, queue.length) }, sendNext)); // 4 chunks in flight
     return true;
   }
 
   async sendSync(peerId, body) {
-    const stream = await this.node.dialProtocol(peerId, VIDEO_SYNC_PROTOCOL, { signal: AbortSignal.timeout(60000) });
+    const stream = await this.node.dialProtocol(peerId, VIDEO_SYNC_PROTOCOL, { preferDirect: true, signal: AbortSignal.timeout(60000) });
     await stream.sink([Buffer.from(JSON.stringify(body))]);
     const chunks = [];
     for await (const c of stream.source) chunks.push(Buffer.from(c.subarray()));
@@ -485,7 +489,7 @@ class VideoProtocol extends EventEmitter {
    * Send request to peer
    */
   async sendRequest(peerId, request, timeout = 30000) {
-    const stream = await this.node.dialProtocol(peerId, VIDEO_PROTOCOL);
+    const stream = await this.node.dialProtocol(peerId, VIDEO_PROTOCOL, { preferDirect: true });
     
     await stream.sink([Buffer.from(JSON.stringify(request))]);
     
