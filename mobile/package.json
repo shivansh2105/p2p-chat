@@ -1,12 +1,14 @@
 {
   "name": "p2p-chat-mobile",
   "version": "1.0.0",
-  "description": "P2P Chat Mobile App - Decentralized messaging",
+  "description": "P2P Chat mobile: joins the same libp2p network as the desktop app",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:e2e": "E2E=1 vite build",
+    "test": "node test/crypto-compat.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^6.0.0",
@@ -14,7 +16,22 @@
     "@capacitor/core": "^6.0.0",
     "@capacitor/preferences": "^6.0.0",
     "@capacitor/splash-screen": "^6.0.0",
-    "@capacitor/status-bar": "^6.0.0"
+    "@capacitor/status-bar": "^6.0.0",
+    "@chainsafe/libp2p-noise": "~16.1.5",
+    "@chainsafe/libp2p-yamux": "~7.0.4",
+    "@libp2p/circuit-relay-v2": "~3.2.24",
+    "@libp2p/crypto": "^5.2.0",
+    "@libp2p/dcutr": "~2.0.38",
+    "@libp2p/identify": "~3.0.39",
+    "@libp2p/kad-dht": "~14.2.15",
+    "@libp2p/peer-id": "^5.1.9",
+    "@libp2p/webrtc": "~5.2.24",
+    "@libp2p/websockets": "~9.2.19",
+    "@multiformats/multiaddr": "^12.5.1",
+    "@noble/curves": "^1.9.7",
+    "@noble/hashes": "^1.8.0",
+    "libp2p": "~2.10.0",
+    "multiformats": "^13.4.2"
   },
   "devDependencies": {
     "@capacitor/cli": "^6.0.0",

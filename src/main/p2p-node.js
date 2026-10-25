@@ -125,16 +125,20 @@ class P2PNode extends EventEmitter {
       this.crypto.saveSecret('libp2p.key', { key: Buffer.from(privateKeyToProtobuf(privateKey)).toString('base64') });
     }
 
+    const ports = this.store?.get('listenPorts', {}) || {};
+
     this.node = await createLibp2p({
       privateKey,
       addresses: {
         listen: [
-          '/ip4/0.0.0.0/tcp/0',              // TCP - works on any port
-          '/ip4/0.0.0.0/tcp/0/ws',           // WebSocket - browser compatible
+          // Ports are random on first run, then REUSED so addresses saved on
+          // phones / UPnP mappings stay valid across restarts
+          `/ip4/0.0.0.0/tcp/${ports.tcp || 0}`,   // TCP
+          `/ip4/0.0.0.0/tcp/${ports.ws || 0}/ws`, // WebSocket - phones/browsers connect here
           // IPv6: many ISPs/mobile carriers (e.g. Jio) give public IPv6 with
           // NO NAT → direct connections even when IPv4 is behind CGNAT
-          '/ip6/::/tcp/0',
-          '/ip6/::/tcp/0/ws',
+          `/ip6/::/tcp/${ports.tcp6 || 0}`,
+          `/ip6/::/tcp/${ports.ws6 || 0}/ws`,
           '/p2p-circuit'                      // Listen via relay (for NAT traversal)
         ]
       },
@@ -271,6 +275,17 @@ class P2PNode extends EventEmitter {
     await this.setupProtocols();
     this.setupEventHandlers();
     await this.node.start();
+
+    // Remember the ports we got; if a saved port was busy, forget it for next launch
+    {
+      const listen = this.node.components?.transportManager?.getAddrs?.().map(String) || [];
+      const port = (re) => { const m = listen.find((a) => re.test(a)); return m ? Number(m.split('/tcp/')[1].split('/')[0]) : 0; };
+      const now = {
+        tcp: port(/^\/ip4\/[^/]+\/tcp\/\d+$/), ws: port(/^\/ip4\/.*\/ws$/),
+        tcp6: port(/^\/ip6\/[^/]+\/tcp\/\d+$/), ws6: port(/^\/ip6\/.*\/ws$/)
+      };
+      this.store?.set('listenPorts', now);
+    }
 
     // Initialize Tailscale-inspired crypto and naming
     await this.initializeCrypto();

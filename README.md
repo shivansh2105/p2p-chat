@@ -12,8 +12,9 @@ Chat and video sharing with **no central server**, built like BitTorrent: every 
 | 🔍 | **Network-wide search** | Find videos by title or tag across the whole network, not just your contacts |
 | 🌱 | **Every viewer seeds** | Watching a video makes you a seeder. Downloads pull chunks from many seeders in parallel |
 | 🧹 | **Smart cleanup** | Your copy is deleted only if your disk is >90% of quota and ≥10 other PCs are confirmed live seeders, or ≥25 are and you haven't watched it in 7 days |
-| 🔗 | **Works behind NAT** | Direct → relay via another PC → hole punching to go direct. Falls back to public IPFS relays when no app user can relay |
+| 🔗 | **Works behind NAT** | UPnP opens a port on home routers, IPv6 needs no NAT, otherwise relay via another PC → hole punching. Falls back to public IPFS relays when no app user can relay |
 | 🙋 | **Usernames** | Find people by @username via the DHT |
+| 📱 | **Phone + PC, one network** | The Android app runs libp2p in the WebView. It joins PCs over WebSocket, reaches the rest via their relays, and uses WebRTC + TURN between phones |
 | ☁️ | **Google Drive backup** | Optional, encrypted |
 
 Each PC donates relay + storage (5 GB default). **On by default, opt-out in settings.**
@@ -74,7 +75,8 @@ src/main/
   video-protocol.js  search, swarm download, replication
   relay-server.js    volunteer relay stats/limits
   username-registry.js, database.js, google-drive.js
-mobile/              Android app (Capacitor + WebRTC)
+mobile/src/net.js    phone libp2p node (same protocols as desktop)
+mobile/src/crypto-web.js  phone crypto, byte-compatible with desktop
 test/                end-to-end tests + internet probes
 ```
 
@@ -94,7 +96,7 @@ cd android && ./gradlew assembleDebug
 ## Limitations (honest)
 
 - **The desktop UI has no video screens yet.** Video features work in the networking layer (`uploadVideo`, `searchVideos`, `downloadVideo`) and are covered by tests, but there are no buttons for them yet.
-- **Mobile is a separate network.** The Android app uses WebRTC with invite codes and TURN servers (metered.ca). It can't yet see desktop peers or their videos.
+- **The phone needs one PC address to join.** The first time, paste a PC's address (Network tab). After that, the rest of the network is found automatically. Phones seed only while the app is open.
 - **No video compression.** Videos are stored at their original size.
 - **Strict NAT on both sides** (common on mobile data): video then needs an app user's PC with an open port to relay. Public relays only carry small amounts of data (~128 KB / 2 min).
 - **DHT metadata is public.** Anyone can see who seeds a video and that someone holds mail for a given Peer ID. Message contents stay private.

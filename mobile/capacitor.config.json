@@ -3,7 +3,8 @@
   "appName": "P2P Chat",
   "webDir": "dist",
   "server": {
-    "androidScheme": "https"
+    "androidScheme": "http",
+    "cleartext": true
   },
   "plugins": {
     "SplashScreen": {
@@ -15,5 +16,8 @@
       "style": "dark",
       "backgroundColor": "#1a1a2e"
     }
+  },
+  "android": {
+    "allowMixedContent": true
   }
 }

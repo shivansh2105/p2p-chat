@@ -1,402 +1,144 @@
-/**
- * P2P Chat Mobile - Browser-Native WebRTC Implementation
- * 
- * Uses browser's built-in WebRTC APIs (no Node.js native modules).
- * Signaling is done via QR codes or manual copy/paste - truly serverless.
- */
+// Mobile UI controller (Telegram-style). Networking lives in net.js.
+import { MobileNode } from './net.js';
+import { idb } from './idb.js';
 
-import { Preferences } from '@capacitor/preferences';
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => document.querySelectorAll(s);
+const esc = (t) => { const d = document.createElement('div'); d.textContent = t ?? ''; return d.innerHTML; };
+const short = (id) => (id ? '…' + id.slice(-6) : '?');
+const toast = (t) => { $$('.toast').forEach((x) => x.remove()); const d = document.createElement('div'); d.className = 'toast'; d.textContent = t; document.body.appendChild(d); setTimeout(() => d.remove(), 3000); };
 
-// Free public STUN + TURN servers for NAT traversal
-// TURN servers relay traffic when direct P2P fails (required for symmetric NAT)
-const ICE_SERVERS = [
-  // STUN servers (discover public IP)
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:stun.cloudflare.com:3478' },
-  
-  // Free TURN servers from Open Relay Project (relay traffic through firewalls)
-  {
-    urls: 'turn:openrelay.metered.ca:80',
-    username: 'openrelayproject',
-    credential: 'openrelayproject'
-  },
-  {
-    urls: 'turn:openrelay.metered.ca:443',
-    username: 'openrelayproject',
-    credential: 'openrelayproject'
-  },
-  {
-    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-    username: 'openrelayproject',
-    credential: 'openrelayproject'
-  },
-  
-  // Backup TURN servers
-  {
-    urls: 'turn:relay.metered.ca:80',
-    username: 'e8dd65b92c62d5e90c2495b1',
-    credential: 'kfOyCZvnMCGtk2xR'
-  },
-  {
-    urls: 'turn:relay.metered.ca:443',
-    username: 'e8dd65b92c62d5e90c2495b1',
-    credential: 'kfOyCZvnMCGtk2xR'
-  }
-];
+let node;
+let chats = {};          // peerId -> { name, messages: [{from, content, timestamp}] }
+let current = null;      // open chat peerId
+let results = [];
 
-class P2PChatMobile {
-  constructor() {
-    this.peerId = this.generatePeerId();
-    this.username = 'Anonymous';
-    this.connections = new Map(); // peerId -> { pc, dataChannel }
-    this.messages = [];
-    this.onMessage = null;
-    this.onPeerConnected = null;
-    this.onPeerDisconnected = null;
-  }
-
-  generatePeerId() {
-    const array = new Uint8Array(16);
-    crypto.getRandomValues(array);
-    return Array.from(array, b => b.toString(16).padStart(2, '0')).join('');
-  }
-
-  async init() {
-    // Load saved data
-    const { value: savedUsername } = await Preferences.get({ key: 'username' });
-    if (savedUsername) this.username = savedUsername;
-
-    const { value: savedMessages } = await Preferences.get({ key: 'messages' });
-    if (savedMessages) {
-      try {
-        this.messages = JSON.parse(savedMessages);
-      } catch (e) {
-        this.messages = [];
-      }
-    }
-
-    console.log('P2P Chat Mobile initialized with peer ID:', this.peerId);
-    return this;
-  }
-
-  async setUsername(name) {
-    // Sanitize
-    this.username = name.replace(/[<>"'&]/g, '').slice(0, 50);
-    await Preferences.set({ key: 'username', value: this.username });
-  }
-
-  /**
-   * Create an offer to connect to this device.
-   * Display this as a QR code for the other device to scan.
-   */
-  async createConnectionOffer() {
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-    
-    // Monitor connection state
-    pc.oniceconnectionstatechange = () => {
-      console.log('ICE connection state:', pc.iceConnectionState);
-      if (pc.iceConnectionState === 'failed') {
-        console.error('ICE connection failed - may need TURN server');
-      }
-    };
-    
-    pc.onconnectionstatechange = () => {
-      console.log('Connection state:', pc.connectionState);
-    };
-    
-    // Create data channel for messaging
-    const dataChannel = pc.createDataChannel('chat', { ordered: true });
-    this.setupDataChannel(dataChannel, null);
-
-    // Create offer
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-
-    // Wait for ICE gathering to complete
-    await this.waitForIceGathering(pc);
-
-    const connectionInfo = {
-      type: 'offer',
-      peerId: this.peerId,
-      username: this.username,
-      sdp: pc.localDescription.sdp
-    };
-
-    // Store pending connection
-    this.pendingOffer = { pc, dataChannel };
-
-    return btoa(JSON.stringify(connectionInfo));
-  }
-
-  /**
-   * Accept a connection offer (from QR scan or paste)
-   */
-  async acceptConnectionOffer(offerData) {
-    try {
-      const info = JSON.parse(atob(offerData));
-      if (info.type !== 'offer') throw new Error('Invalid offer');
-
-      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-      
-      // Monitor connection state
-      pc.oniceconnectionstatechange = () => {
-        console.log('ICE connection state:', pc.iceConnectionState);
-        if (pc.iceConnectionState === 'failed') {
-          console.error('ICE connection failed - may need TURN server');
-        }
-      };
-      
-      pc.onconnectionstatechange = () => {
-        console.log('Connection state:', pc.connectionState);
-      };
-      
-      // Handle incoming data channel
-      pc.ondatachannel = (event) => {
-        this.setupDataChannel(event.channel, info.peerId);
-        this.connections.set(info.peerId, { 
-          pc, 
-          dataChannel: event.channel,
-          username: info.username 
-        });
-        if (this.onPeerConnected) {
-          this.onPeerConnected(info.peerId, info.username);
-        }
-      };
-
-      // Set remote description (the offer)
-      await pc.setRemoteDescription({ type: 'offer', sdp: info.sdp });
-      
-      // Create answer
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      
-      // Wait for ICE gathering
-      await this.waitForIceGathering(pc);
-
-      const answerInfo = {
-        type: 'answer',
-        peerId: this.peerId,
-        username: this.username,
-        sdp: pc.localDescription.sdp
-      };
-
-      // Store the connection
-      this.pendingAnswer = { pc, remotePeerId: info.peerId, remoteUsername: info.username };
-
-      return btoa(JSON.stringify(answerInfo));
-    } catch (e) {
-      console.error('Failed to accept offer:', e);
-      throw new Error('Invalid connection code');
-    }
-  }
-
-  /**
-   * Complete connection with answer (the offerer calls this)
-   */
-  async completeConnection(answerData) {
-    if (!this.pendingOffer) throw new Error('No pending offer');
-
-    try {
-      const info = JSON.parse(atob(answerData));
-      if (info.type !== 'answer') throw new Error('Invalid answer');
-
-      const { pc, dataChannel } = this.pendingOffer;
-      
-      await pc.setRemoteDescription({ type: 'answer', sdp: info.sdp });
-      
-      // Store connection
-      this.connections.set(info.peerId, { 
-        pc, 
-        dataChannel,
-        username: info.username 
-      });
-
-      this.pendingOffer = null;
-
-      if (this.onPeerConnected) {
-        this.onPeerConnected(info.peerId, info.username);
-      }
-
-      return info.peerId;
-    } catch (e) {
-      console.error('Failed to complete connection:', e);
-      throw new Error('Invalid answer code');
-    }
-  }
-
-  setupDataChannel(channel, peerId) {
-    channel.onopen = () => {
-      console.log('Data channel opened with peer:', peerId);
-    };
-
-    channel.onclose = () => {
-      console.log('Data channel closed:', peerId);
-      if (peerId && this.connections.has(peerId)) {
-        this.connections.delete(peerId);
-        if (this.onPeerDisconnected) {
-          this.onPeerDisconnected(peerId);
-        }
-      }
-    };
-
-    channel.onmessage = async (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        
-        // Add to messages
-        const message = {
-          id: msg.id || this.generatePeerId(),
-          from: msg.from,
-          fromUsername: msg.fromUsername,
-          content: msg.content.replace(/[<>"'&]/g, ''), // XSS sanitize
-          timestamp: msg.timestamp || Date.now()
-        };
-        
-        this.messages.push(message);
-        await this.saveMessages();
-        
-        if (this.onMessage) {
-          this.onMessage(message);
-        }
-      } catch (e) {
-        console.error('Failed to parse message:', e);
-      }
-    };
-  }
-
-  async waitForIceGathering(pc) {
-    if (pc.iceGatheringState === 'complete') return;
-    
-    return new Promise((resolve) => {
-      let candidateCount = 0;
-      
-      // Log ICE candidates for debugging
-      pc.onicecandidate = (event) => {
-        if (event.candidate) {
-          candidateCount++;
-          console.log(`ICE candidate ${candidateCount}:`, event.candidate.type, event.candidate.address);
-        }
-      };
-      
-      const checkState = () => {
-        if (pc.iceGatheringState === 'complete') {
-          console.log(`ICE gathering complete. Total candidates: ${candidateCount}`);
-          resolve();
-        }
-      };
-      pc.onicegatheringstatechange = checkState;
-      
-      // Timeout after 15 seconds (TURN candidates take longer)
-      setTimeout(() => {
-        console.log(`ICE gathering timeout. Candidates gathered: ${candidateCount}`);
-        resolve();
-      }, 15000);
-    });
-  }
-
-  /**
-   * Send a message to all connected peers
-   */
-  async sendMessage(content) {
-    const sanitizedContent = content.replace(/[<>"'&]/g, '').slice(0, 5000);
-    
-    const message = {
-      id: this.generatePeerId(),
-      from: this.peerId,
-      fromUsername: this.username,
-      content: sanitizedContent,
-      timestamp: Date.now()
-    };
-
-    // Send to all connected peers
-    for (const [peerId, conn] of this.connections) {
-      if (conn.dataChannel && conn.dataChannel.readyState === 'open') {
-        try {
-          conn.dataChannel.send(JSON.stringify(message));
-        } catch (e) {
-          console.error('Failed to send to peer:', peerId, e);
-        }
-      }
-    }
-
-    // Add to our own messages
-    this.messages.push(message);
-    await this.saveMessages();
-
-    return message;
-  }
-
-  /**
-   * Send a direct message to a specific peer
-   */
-  async sendDirectMessage(peerId, content) {
-    const conn = this.connections.get(peerId);
-    if (!conn || !conn.dataChannel || conn.dataChannel.readyState !== 'open') {
-      throw new Error('Not connected to peer');
-    }
-
-    const sanitizedContent = content.replace(/[<>"'&]/g, '').slice(0, 5000);
-
-    const message = {
-      id: this.generatePeerId(),
-      from: this.peerId,
-      fromUsername: this.username,
-      content: sanitizedContent,
-      timestamp: Date.now(),
-      direct: true
-    };
-
-    conn.dataChannel.send(JSON.stringify(message));
-    this.messages.push(message);
-    await this.saveMessages();
-
-    return message;
-  }
-
-  async saveMessages() {
-    // Keep last 1000 messages
-    if (this.messages.length > 1000) {
-      this.messages = this.messages.slice(-1000);
-    }
-    await Preferences.set({ 
-      key: 'messages', 
-      value: JSON.stringify(this.messages) 
-    });
-  }
-
-  getConnectedPeers() {
-    const peers = [];
-    for (const [peerId, conn] of this.connections) {
-      if (conn.dataChannel && conn.dataChannel.readyState === 'open') {
-        peers.push({
-          peerId,
-          username: conn.username || 'Unknown'
-        });
-      }
-    }
-    return peers;
-  }
-
-  disconnect(peerId) {
-    const conn = this.connections.get(peerId);
-    if (conn) {
-      if (conn.dataChannel) conn.dataChannel.close();
-      if (conn.pc) conn.pc.close();
-      this.connections.delete(peerId);
-    }
-  }
-
-  disconnectAll() {
-    for (const peerId of this.connections.keys()) {
-      this.disconnect(peerId);
-    }
-  }
+function show(id) {
+  $$('.screen').forEach((s) => s.classList.remove('active'));
+  $('#' + id).classList.add('active');
+  const nav = id === 'threadScreen' ? 'chatsScreen' : id;
+  $$('.nav-item').forEach((n) => n.classList.toggle('active', n.dataset.screen === nav));
 }
 
-// Export singleton
-const p2pChat = new P2PChatMobile();
-export default p2pChat;
+async function saveChats() { await idb.set('chats', chats); }
 
-// Also expose globally for the HTML
-window.P2PChat = p2pChat;
+function renderPeers() {
+  const ps = node.peers();
+  $('#peerCount').textContent = ps.length ? `${ps.length} online` : 'Offline';
+  $('#statusDot').className = `status-dot ${ps.length ? 'online' : ''}`;
+  $('#peerList').innerHTML = ps.map((p) => `<li data-peer="${esc(p)}">${esc(chats[p]?.name || short(p))}<span class="hint">chat ›</span></li>`).join('') || '<li class="hint">Not connected yet</li>';
+}
+
+function renderChats() {
+  const ids = Object.keys(chats);
+  $('#noChats').style.display = ids.length ? 'none' : '';
+  $('#chatList').innerHTML = ids.map((id) => {
+    const last = chats[id].messages.at(-1);
+    return `<li data-peer="${esc(id)}"><b>${esc(chats[id].name || short(id))}</b><br><span class="hint">${esc(last?.content || '')}</span></li>`;
+  }).join('');
+}
+
+function renderThread() {
+  const c = chats[current];
+  $('#threadName').textContent = c?.name || short(current);
+  $('#messages').innerHTML = (c?.messages || []).map((m) => `
+    <div class="message ${m.from === node.peerId ? 'own' : 'other'}">
+      <div class="message-content">${esc(m.content)}</div>
+      <div class="message-header"><span class="time">${new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${m.note ? ' · ' + esc(m.note) : ''}</span></div>
+    </div>`).join('');
+  $('#messages').scrollTop = $('#messages').scrollHeight;
+}
+
+function openChat(peerId) {
+  chats[peerId] ||= { name: short(peerId), messages: [] };
+  current = peerId;
+  renderThread();
+  show('threadScreen');
+}
+
+async function send() {
+  const text = $('#messageInput').value.trim();
+  if (!text || !current) return;
+  $('#messageInput').value = '';
+  const msg = { from: node.peerId, content: text, timestamp: Date.now(), note: 'sending…' };
+  chats[current].messages.push(msg);
+  renderThread();
+  try { msg.note = (await node.sendMessage(current, text)) === 'direct' ? '✓' : '✓ stored for offline'; }
+  catch (e) { msg.note = '✗ ' + e.message; }
+  renderThread(); renderChats(); saveChats();
+}
+
+function renderVideos() {
+  $('#videoList').innerHTML = results.map((v, i) => `
+    <li data-i="${i}"><b>${esc(v.title)}</b><br>
+    <span class="hint">${(v.size / 1048576).toFixed(1)} MB · ${esc(v.uploaderName || short(v.uploader))}</span></li>`).join('') || '<li class="hint">No videos found</li>';
+}
+
+const progress = (p) => { $('#progress').textContent = p ? `${p.stage} ${p.percent}%` : ''; };
+
+async function search() {
+  const q = $('#searchInput').value.trim();
+  if (!q) return;
+  $('#progress').textContent = 'Searching the network…';
+  results = await node.searchNetwork(q).catch(() => []);
+  progress(null); renderVideos();
+}
+
+async function watch(v) {
+  try {
+    const url = await node.watch(v, progress);
+    $('#videoEl').src = url; $('#playerTitle').textContent = v.title;
+    $('#player').style.display = ''; $('#videoEl').play().catch(() => {});
+    toast('Playing — you are now seeding this video while the app is open');
+  } catch (e) { toast(e.message); }
+  progress(null);
+}
+
+async function upload() {
+  const f = $('#fileInput').files[0];
+  if (!f) return toast('Pick a video first');
+  try {
+    const v = await node.uploadVideo(f, {
+      title: $('#titleInput').value.trim() || f.name,
+      tags: $('#tagsInput').value.split(',').map((t) => t.trim()).filter(Boolean)
+    }, progress);
+    toast(v.replicas.length ? `Uploaded · copied to ${v.replicas.length} PC(s)` : 'Saved on phone · no PC online to copy to yet');
+  } catch (e) { toast(e.message); }
+  progress(null);
+}
+
+(async () => {
+  chats = (await idb.get('chats')) || {};
+  node = await new MobileNode().start();
+  $('#myId').textContent = node.peerId;
+  renderPeers(); renderChats();
+
+  node.addEventListener('peers', renderPeers);
+  node.addEventListener('message', (e) => {
+    const m = e.detail;
+    chats[m.from] ||= { name: short(m.from), messages: [] };
+    chats[m.from].messages.push({ from: m.from, content: m.content, timestamp: m.timestamp });
+    saveChats(); renderChats();
+    if (current === m.from) renderThread(); else toast(`New message from ${chats[m.from].name}`);
+  });
+
+  // Mail held for us anywhere on the network (via DHT), once connected
+  setTimeout(() => node.findMyMail().catch(() => {}), 8000);
+  setInterval(() => node.findMyMail().catch(() => {}), 5 * 60 * 1000);
+
+  $('#connectBtn').onclick = async () => {
+    const a = $('#addrInput').value.trim();
+    if (!a) return;
+    try { await node.dial(a); toast('Connected to the network'); renderPeers(); } catch (e) { toast('Could not connect: ' + e.message); }
+  };
+  $('#peerList').onclick = (e) => { const p = e.target.closest('li')?.dataset.peer; if (p) openChat(p); };
+  $('#chatList').onclick = (e) => { const p = e.target.closest('li')?.dataset.peer; if (p) openChat(p); };
+  $('#backBtn').onclick = () => { current = null; show('chatsScreen'); };
+  $('#sendBtn').onclick = send;
+  $('#messageInput').onkeydown = (e) => e.key === 'Enter' && send();
+  $('#searchBtn').onclick = search;
+  $('#searchInput').onkeydown = (e) => e.key === 'Enter' && search();
+  $('#videoList').onclick = (e) => { const i = e.target.closest('li')?.dataset.i; if (i != null) watch(results[i]); };
+  $('#uploadBtn').onclick = upload;
+  $$('.nav-item').forEach((n) => (n.onclick = () => show(n.dataset.screen)));
+})().catch((e) => { $('#peerCount').textContent = 'Error'; toast(e.message); console.error(e); });
