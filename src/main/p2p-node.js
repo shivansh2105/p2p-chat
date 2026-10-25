@@ -98,6 +98,11 @@ class P2PNode extends EventEmitter {
     // Message store for offline delivery (BitTorrent-style)
     const { MessageStore } = require('./message-store');
     this.messageStore = new MessageStore(this.store);
+    
+    // Video store for P2P video sharing (YouTube-style)
+    const { VideoStore } = require('./video-store');
+    this.videoStore = new VideoStore(this.dataDir, this.store);
+    this.videoProtocol = null;
   }
 
   async start() {
@@ -186,6 +191,9 @@ class P2PNode extends EventEmitter {
     
     // Initialize relay server and client (volunteer node support)
     await this.initializeRelay();
+    
+    // Initialize video protocol (P2P YouTube-style sharing)
+    await this.initializeVideoProtocol();
 
     // Get shareable addresses
     this.publicAddresses = this.getShareableAddresses();
@@ -947,6 +955,71 @@ class P2PNode extends EventEmitter {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Initialize P2P video sharing protocol
+   */
+  async initializeVideoProtocol() {
+    try {
+      const { VideoProtocol } = require('./video-protocol');
+      this.videoProtocol = new VideoProtocol(this.node, this.videoStore);
+      await this.videoProtocol.start();
+      
+      // Re-announce videos we're seeding
+      for (const video of this.videoStore.getSeedingVideos()) {
+        await this.videoProtocol.announceVideo(video);
+      }
+      
+      console.log('[Video] P2P video sharing enabled');
+    } catch (error) {
+      console.error('[Video] Initialization failed:', error);
+    }
+  }
+
+  /**
+   * Upload a video to the P2P network
+   */
+  async uploadVideo(filePath, metadata) {
+    const video = await this.videoStore.uploadVideo(filePath, {
+      ...metadata,
+      uploader: this.peerId,
+      uploaderName: this.username
+    });
+    
+    // Announce to network
+    if (this.videoProtocol) {
+      await this.videoProtocol.announceVideo(video);
+    }
+    
+    return video;
+  }
+
+  /**
+   * Search videos on the network
+   */
+  async searchVideos(query) {
+    if (this.videoProtocol) {
+      return await this.videoProtocol.searchNetwork(query);
+    }
+    return this.videoStore.searchVideos(query);
+  }
+
+  /**
+   * Download a video from peers
+   */
+  async downloadVideo(videoId, onProgress) {
+    if (this.videoProtocol) {
+      return await this.videoProtocol.downloadVideo(videoId, onProgress);
+    }
+    throw new Error('Video protocol not initialized');
+  }
+
+  /**
+   * Get video stats
+   */
+  getVideoStats() {
+    return this.videoStore.getStats();
   }
 
   /**
