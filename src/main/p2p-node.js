@@ -94,6 +94,10 @@ class P2PNode extends EventEmitter {
     // Volunteer relay server (like Tor/Bitcoin node)
     this.relayServer = null;
     this.relayClient = null;
+    
+    // Message store for offline delivery (BitTorrent-style)
+    const { MessageStore } = require('./message-store');
+    this.messageStore = new MessageStore(this.store);
   }
 
   async start() {
@@ -499,7 +503,45 @@ class P2PNode extends EventEmitter {
       }
     }
 
-    // METHOD 3: Queue for later
+    // METHOD 3: Store on relay network for offline delivery (BitTorrent-style)
+    if (!delivered) {
+      try {
+        // Get recipient's public key from registry
+        const recipientInfo = await this.registry?.lookup(recipientId);
+        if (recipientInfo?.publicKey) {
+          // Encrypt message for recipient
+          const encrypted = this.crypto.encryptForRecipient(
+            JSON.stringify(payload),
+            recipientInfo.publicKey
+          );
+          
+          // Store on our local relay (other relays will sync via gossip)
+          this.messageStore.storeMessage(
+            recipientInfo.publicKey,
+            encrypted,
+            this.crypto.getPublicKey()
+          );
+          
+          // Announce via gossip that messages are waiting
+          const pubsub = this.node.services.pubsub;
+          await pubsub.publish(
+            'p2p-chat:offline-notify',
+            fromString(JSON.stringify({
+              recipient: recipientId,
+              relay: this.peerId,
+              count: this.messageStore.getMessageCount(recipientInfo.publicKey)
+            }))
+          );
+          
+          console.log(`[MessageStore] Stored message for offline user ${recipientId.slice(-8)}`);
+          delivered = true;
+        }
+      } catch (e) {
+        console.log('Relay store failed:', e.message);
+      }
+    }
+
+    // METHOD 4: Queue locally as last resort
     if (!delivered) {
       this.queuePendingMessage(recipientId, payload);
     }

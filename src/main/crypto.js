@@ -368,6 +368,84 @@ class P2PCrypto {
     }
     this.sessionKeys.clear();
   }
+
+  /**
+   * Encrypt a message for a specific recipient's public key
+   * Used for storing offline messages on relay nodes
+   */
+  encryptForRecipient(plaintext, recipientPublicKey) {
+    // Generate ephemeral keypair for this message
+    const ephemeral = crypto.createECDH('secp256k1');
+    ephemeral.generateKeys();
+    
+    // Derive shared secret with recipient's public key
+    const sharedSecret = ephemeral.computeSecret(
+      Buffer.from(recipientPublicKey, 'hex')
+    );
+    
+    // Derive encryption key
+    const key = crypto.createHash('sha256').update(sharedSecret).digest();
+    const iv = crypto.randomBytes(16);
+    
+    // Encrypt
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+    let encrypted = cipher.update(plaintext, 'utf8');
+    encrypted = Buffer.concat([encrypted, cipher.final()]);
+    const authTag = cipher.getAuthTag();
+    
+    // Clear sensitive data
+    sharedSecret.fill(0);
+    key.fill(0);
+    
+    // Return: ephemeralPubKey + iv + authTag + ciphertext
+    return Buffer.concat([
+      ephemeral.getPublicKey(),
+      iv,
+      authTag,
+      encrypted
+    ]).toString('base64');
+  }
+
+  /**
+   * Decrypt a message encrypted for us
+   */
+  decryptFromSender(encryptedBase64) {
+    const data = Buffer.from(encryptedBase64, 'base64');
+    
+    // Parse components
+    const ephemeralPubKey = data.subarray(0, 65); // secp256k1 uncompressed
+    const iv = data.subarray(65, 81);
+    const authTag = data.subarray(81, 97);
+    const ciphertext = data.subarray(97);
+    
+    // Derive shared secret using our private key
+    const ecdh = crypto.createECDH('secp256k1');
+    ecdh.setPrivateKey(this.privateKey);
+    const sharedSecret = ecdh.computeSecret(ephemeralPubKey);
+    
+    // Derive decryption key
+    const key = crypto.createHash('sha256').update(sharedSecret).digest();
+    
+    // Decrypt
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(authTag);
+    let decrypted = decipher.update(ciphertext);
+    decrypted = Buffer.concat([decrypted, decipher.final()]);
+    
+    // Clear sensitive data
+    sharedSecret.fill(0);
+    key.fill(0);
+    
+    return decrypted.toString('utf8');
+  }
+
+  /**
+   * Get our public key for others to encrypt to
+   */
+  getPublicKey() {
+    if (!this.publicKey) return null;
+    return this.publicKey.toString('hex');
+  }
 }
 
 module.exports = P2PCrypto;
