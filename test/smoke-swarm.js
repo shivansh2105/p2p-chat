@@ -27,8 +27,8 @@ function mk(name, dir, extra = {}) {
   const store = { m: new Map(), get(k, d) { return this.m.has(k) ? this.m.get(k) : d; }, set(k, v) { this.m.set(k, v); }, delete(k) { this.m.delete(k); } };
   store.set('user', { username: name });
   store.set('bootstrap', false);
-  store.set('tunnel', false); // isolate from public network
-  store.set('tunnel', false);
+  store.set('tunnel', false); store.set('bittorrent', false); // isolate from public network
+  store.set('tunnel', false); store.set('bittorrent', false);
   store.set('mdns', false);      // no LAN auto-discovery: only explicit links + DHT
   for (const [k, v] of Object.entries(extra)) store.set(k, v);
   return new P2PNode({ async addMessage() {}, getMessagesSince() { return []; }, updateContactUsername() {} }, store, dir);

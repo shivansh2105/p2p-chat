@@ -69,6 +69,7 @@ const summarize = (v) => v && ({
   id: v.id, title: v.title, description: v.description, tags: v.tags || [], size: v.size,
   chunkCount: v.chunkCount, mimeType: v.mimeType, uploaderName: v.uploaderName,
   uploadedAt: v.uploadedAt, replicas: (v.replicas || []).length,
+  magnet: v.magnet || null,
   local: p2pNode.videoStore.seeding.has(v.id),
   have: p2pNode.videoStore.getAvailableChunks(v.id).length
 });
@@ -137,13 +138,27 @@ function setupVideo() {
     return `p2pvideo://v/${v.id}`;
   });
 
-  ipcMain.handle('video:stats', () => ({
+  ipcMain.handle('video:stats', async () => ({
     ...p2pNode.getVideoStats(),
     storageEnabled: store.get('storageEnabled', true),
-    quotaMB: store.get('storageQuotaMB', 5120)
+    quotaMB: store.get('storageQuotaMB', 5120),
+    bittorrent: store.get('bittorrent', true),
+    bittorrentActive: !!p2pNode.torrent?.available,
+    bittorrentStats: p2pNode.torrent ? await p2pNode.torrent.stats() : null
   }));
 
-  ipcMain.handle('video:setStorage', (_, { enabled, quotaMB } = {}) => {
+  ipcMain.handle('video:setStorage', async (_, { enabled, quotaMB, bittorrent } = {}) => {
+    if (typeof bittorrent === 'boolean') {
+      store.set('bittorrent', bittorrent);
+      try {
+        if (!bittorrent) p2pNode.torrent?.stop();
+        else if (!p2pNode.torrent?.available) {
+          const { TorrentBridge } = require('./torrent-bridge');
+          p2pNode.torrent = new TorrentBridge(p2pNode);
+          p2pNode.torrent.start().catch(() => {});
+        }
+      } catch (e) { /* optional feature — never break settings */ }
+    }
     if (typeof enabled === 'boolean') store.set('storageEnabled', enabled);
     if (Number.isFinite(quotaMB) && quotaMB >= 100 && quotaMB <= 1024 * 1024) store.set('storageQuotaMB', Math.round(quotaMB));
     return true;

@@ -187,6 +187,11 @@ class VideoStore extends EventEmitter {
    */
   addVideoFromNetwork(video) {
     const existing = this.videos.get(video.id);
+    // Learn the BitTorrent identity of a video we already know
+    if (existing && !existing.torrent && typeof video.torrent === 'string' && video.torrent.length < 200000) {
+      Object.assign(existing, { torrent: video.torrent, infoHash: video.infoHash, magnet: video.magnet });
+      this.saveIndex();
+    }
     if (existing && (!existing.contentHash || !Array.isArray(existing.chunkHashes)) && video.contentHash) {
       // Upgrade an incomplete record (e.g. from an older/partial announcement)
       Object.assign(existing, { chunkHashes: video.chunkHashes, contentHash: video.contentHash, chunkSize: video.chunkSize || existing.chunkSize });
@@ -289,6 +294,20 @@ class VideoStore extends EventEmitter {
     this.seeding.delete(videoId);
     video.evictedAt = Date.now();
     this.saveIndex();
+  }
+
+  /** Register chunk files written by another process (BitTorrent worker) */
+  adoptChunks(videoId) {
+    const video = this.videos.get(videoId);
+    if (!video) return 0;
+    let n = 0;
+    for (const h of video.chunkHashes) {
+      if (this.chunks.has(h)) continue;
+      const p = path.join(this.dataDir, `${h}.chunk`);
+      if (fs.existsSync(p)) { this.chunks.set(h, p); n++; }
+    }
+    if (n) this.saveIndex();
+    return n;
   }
 
   /** Bytes of chunk data on disk */

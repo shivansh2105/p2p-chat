@@ -141,7 +141,7 @@ class VideoProtocol extends EventEmitter {
       duration: video.duration, size: video.size, chunkSize: video.chunkSize, chunkCount: video.chunkCount,
       chunkHashes: video.chunkHashes, contentHash: video.contentHash, mimeType: video.mimeType,
       thumbnail: video.thumbnail, uploader: video.uploader, uploaderName: video.uploaderName,
-      uploadedAt: video.uploadedAt
+      uploadedAt: video.uploadedAt, infoHash: video.infoHash, magnet: video.magnet, torrent: video.torrent
     }});
     if (!meta.ok) throw new Error(meta.error || 'rejected');
     const have = new Set(meta.have || []);
@@ -219,7 +219,8 @@ class VideoProtocol extends EventEmitter {
         uploaderName: v.uploaderName,
         uploadedAt: v.uploadedAt,
         views: v.views,
-        seeders: v.seeders
+        seeders: v.seeders,
+        infoHash: v.infoHash, magnet: v.magnet, torrent: v.torrent
       }))
     };
   }
@@ -287,8 +288,13 @@ class VideoProtocol extends EventEmitter {
       peerId: this.node.peerId.toString()
     };
 
-    await pubsub.publish(VIDEO_TOPIC, Buffer.from(JSON.stringify(announcement)));
-    console.log(`[VideoProtocol] Announced: ${video.title}`);
+    try {
+      await pubsub.publish(VIDEO_TOPIC, Buffer.from(JSON.stringify(announcement)));
+      console.log(`[VideoProtocol] Announced: ${video.title}`);
+    } catch (e) {
+      // NoPeersSubscribedToTopic etc. is normal when nobody is online yet —
+      // the DHT records (announceSeeding) still make the video findable.
+    }
   }
 
   /** Words used for DHT keyword records */
@@ -520,6 +526,7 @@ class VideoProtocol extends EventEmitter {
       if ((pressure && others >= cfg.safeCopies) || plentyAndIdle) {
         vs.removeLocalCopy(v.id);
         this.discovery?.unprovide('video:' + v.id);
+        this.emit('evicted', v);
         evicted.push({ id: v.id, title: v.title, otherCopies: others, reason: pressure ? 'disk quota' : 'plenty of seeders' });
         console.log(`[Video] Freed space: dropped "${v.title}" (${others} other PCs still have it)`);
       }

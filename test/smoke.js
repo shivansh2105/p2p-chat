@@ -35,8 +35,8 @@ function makeNode(name) {
   const store = new MemStore();
   store.set('user', { username: name });
   store.set('bootstrap', false);
-  store.set('tunnel', false); // local test: public network covered by probe:internet
-  store.set('tunnel', false);
+  store.set('tunnel', false); store.set('bittorrent', false); // local test: public network covered by probe:internet
+  store.set('tunnel', false); store.set('bittorrent', false);
   return new P2PNode(new MemDb(), store, dir);
 }
 

@@ -12,9 +12,10 @@
     "build:win": "electron-builder --win --x64 --publish never",
     "build:mac": "electron-builder --mac --publish never",
     "build:linux": "electron-builder --linux --publish never",
-    "test": "node test/smoke.js --offline && node test/smoke.js --video && node test/smoke-relay.js && node test/smoke-swarm.js",
+    "test": "node test/smoke.js --offline && node test/smoke.js --video && node test/smoke-relay.js && node test/smoke-swarm.js && node test/smoke-torrent.js",
     "probe:internet": "node test/probe-bootstrap.js && node test/probe-public-relay.js && node test/probe-nat.js",
-    "probe:tunnel": "node test/probe-tunnel.js"
+    "probe:tunnel": "node test/probe-tunnel.js",
+    "probe:magnet": "node test/probe-magnet.mjs"
   },
   "build": {
     "appId": "com.p2pchat.app",
@@ -24,7 +25,8 @@
     },
     "files": [
       "src/**/*",
-      "package.json"
+      "package.json",
+      "stubs/**/*"
     ],
     "win": {
       "target": [
@@ -40,7 +42,8 @@
       "target": [
         "AppImage"
       ]
-    }
+    },
+    "npmRebuild": false
   },
   "dependencies": {
     "@chainsafe/libp2p-gossipsub": "^14.1.2",
@@ -63,10 +66,25 @@
     "electron-store": "^8.2.0",
     "libp2p": "^2.8.4",
     "uint8arrays": "^5.1.0",
-    "uuid": "^10.0.0"
+    "utp-native": "file:stubs/utp-native",
+    "uuid": "^10.0.0",
+    "webrtc-polyfill": "file:stubs/webrtc-polyfill",
+    "webtorrent": "^2.8.5",
+    "ip-set": "file:stubs/ip-set"
   },
   "devDependencies": {
     "electron": "^33.2.1",
     "electron-builder": "^25.1.8"
+  },
+  "optionalDependencies": {
+    "bencode": "^4.0.1",
+    "bittorrent-dht": "^11.0.12",
+    "bittorrent-protocol": "^5.0.9"
+  },
+  "overrides": {
+    "webrtc-polyfill": "$webrtc-polyfill",
+    "utp-native": "$utp-native",
+    "uint8-util": "2.2.6",
+    "ip-set": "$ip-set"
   }
 }

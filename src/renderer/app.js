@@ -830,9 +830,21 @@ function setupVideos() {
   $('videoSearchBtn').addEventListener('click', searchVideos);
   $('videoSearchInput').addEventListener('keypress', (e) => e.key === 'Enter' && searchVideos());
   $('videoUploadBtn').addEventListener('click', uploadVideo);
-  $('videoList').addEventListener('click', (e) => {
+  $('videoList').addEventListener('click', async (e) => {
+    const mag = e.target.closest('[data-magnet]');
+    if (mag) {
+      e.stopPropagation();
+      try { await navigator.clipboard.writeText(mag.dataset.magnet); mag.textContent = '✓ Copied'; }
+      catch { prompt('Magnet link (paste into uTorrent / qBittorrent):', mag.dataset.magnet); }
+      setTimeout(() => (mag.textContent = '🧲 Magnet'), 2000);
+      return;
+    }
     const id = e.target.closest('[data-video]')?.dataset.video;
     if (id) playVideo(id);
+  });
+  $('bittorrentToggle').addEventListener('change', async (e) => {
+    await window.api.video.setStorage({ bittorrent: e.target.checked });
+    setTimeout(refreshVideoStats, 3000);
   });
   $('storageToggle').addEventListener('change', (e) => window.api.video.setStorage({ enabled: e.target.checked }));
   $('quotaInput').addEventListener('change', (e) => window.api.video.setStorage({ quotaMB: Number(e.target.value) }));
@@ -862,6 +874,10 @@ async function refreshVideoStats() {
   const s = await window.api.video.stats();
   document.getElementById('videoStats').textContent = `Seeding ${s.videosSeeding} · ${s.totalSizeMB} MB used · ${s.videosKnown} known`;
   document.getElementById('storageToggle').checked = s.storageEnabled;
+  document.getElementById('bittorrentToggle').checked = s.bittorrent;
+  document.getElementById('btStatus').textContent = !s.bittorrent ? '' : s.bittorrentActive
+    ? `· active, ${s.bittorrentStats?.torrents || 0} torrents, ${s.bittorrentStats?.peers || 0} peers`
+    : '· not running (optional — app works without it)';
   document.getElementById('quotaInput').value = s.quotaMB;
 }
 
@@ -870,6 +886,7 @@ function renderVideoList(items, emptyText) {
   document.getElementById('videoList').innerHTML = items.length ? items.map((v) => `
     <div class="video-item" data-video="${vEsc(v.id)}">
       <div class="video-thumb">▶</div>
+      ${v.magnet ? `<button class="magnet-btn" data-magnet="${vEsc(v.magnet)}" title="Copy magnet link for uTorrent / qBittorrent">🧲 Magnet</button>` : ''}
       <div class="video-meta">
         <div class="video-name">${vEsc(v.title)}</div>
         <div class="hint">${vSize(v.size)} · ${vEsc(v.uploaderName || 'unknown')}${v.local ? ' · ✓ seeding' : v.have ? ` · ${Math.round((v.have / v.chunkCount) * 100)}% local` : ''}${(v.tags || []).length ? ' · #' + v.tags.map(vEsc).join(' #') : ''}</div>

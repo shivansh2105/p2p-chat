@@ -1,0 +1,29 @@
+{
+  "name": "ip-set",
+  "description": "Efficient mutable set for IP addresses (vendored without its `npx only-allow pnpm` preinstall, which breaks npm installs of dependents)",
+  "version": "3.0.0-nopreinstall",
+  "author": "Travis Fischer <fisch0920@gmail.com>",
+  "homepage": "http://webtorrent.io",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/fisch0920/ip-set.git"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "type": "commonjs",
+  "main": "index.js",
+  "dependencies": {
+    "ip-address": "^10.0.1"
+  },
+  "keywords": [
+    "IP",
+    "address",
+    "ipv4",
+    "ipv6",
+    "set",
+    "blacklist",
+    "blocklist"
+  ]
+}

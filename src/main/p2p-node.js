@@ -319,6 +319,16 @@ class P2PNode extends EventEmitter {
     // Initialize video protocol (P2P YouTube-style sharing)
     await this.initializeVideoProtocol();
 
+    // BitTorrent layer (uTorrent/qBittorrent interop): optional, isolated in a
+    // child process, never blocks startup and can't break the app if it fails
+    if (this.store?.get('bittorrent', true) ?? true) {
+      try {
+        const { TorrentBridge } = require('./torrent-bridge');
+        this.torrent = new TorrentBridge(this);
+        this.torrent.start().catch(() => {});
+      } catch (e) { console.log('[BitTorrent] disabled:', e.message); }
+    }
+
     // Free public reachability (Cloudflare Quick Tunnel, no account): makes this
     // PC reachable + a relay even behind strict NAT/CGNAT. Background, opt-out.
     if ((this.store?.get('relayEnabled', true) ?? true) && (this.store?.get('tunnel', true) ?? true)) {
@@ -1098,6 +1108,9 @@ class P2PNode extends EventEmitter {
       this.videoProtocol = new VideoProtocol(this.node, this.videoStore);
       this.videoProtocol.discovery = this.discovery;
       await this.videoProtocol.start();
+      // Every full copy we get is also seeded on BitTorrent; evicted ones stop
+      this.videoProtocol.on('replicaComplete', (v) => { this.torrent?.seedVideo(v); });
+      this.videoProtocol.on('evicted', (v) => { this.torrent?.remove(v); });
       for (const v of this.videoStore.getSeedingVideos()) this.videoProtocol.announceSeeding(v);
 
       // Free disk space when lots of other PCs already seed a video
@@ -1113,9 +1126,9 @@ class P2PNode extends EventEmitter {
           .map((v) => v.id)
       );
 
-      // Re-announce videos we're seeding
+      // Re-announce videos we're seeding (best effort — never blocks init)
       for (const video of this.videoStore.getSeedingVideos()) {
-        await this.videoProtocol.announceVideo(video);
+        await this.videoProtocol.announceVideo(video).catch(() => {});
       }
       
       console.log('[Video] P2P video sharing enabled');
@@ -1140,6 +1153,9 @@ class P2PNode extends EventEmitter {
       await this.videoProtocol.announceVideo(video).catch(() => {});
       this.videoProtocol.announceSeeding(video);
     }
+
+    // Also publish as a BitTorrent torrent (magnet link) — background, optional
+    this.torrent?.seedVideo(video).catch?.(() => {});
     
     // REPLICATE to other peers (like BitTorrent seeding)
     this.replicateVideo(video).catch((e) => console.log("[Video] replication error:", e.message)); // background
@@ -1215,10 +1231,30 @@ class P2PNode extends EventEmitter {
    * Download a video from peers
    */
   async downloadVideo(videoId, onProgress) {
-    if (this.videoProtocol) {
-      return await this.videoProtocol.downloadVideo(videoId, onProgress);
+    if (!this.videoProtocol) throw new Error('Video protocol not initialized');
+    try {
+      const v = await this.videoProtocol.downloadVideo(videoId, onProgress);
+      this.torrent?.seedVideo(v);
+      return v;
+    } catch (err) {
+      // Fallback: BitTorrent swarm (uTorrent/qBittorrent seeders). Optional —
+      // if it can't help, the original error is reported unchanged.
+      const v = this.videoStore.getVideo(videoId);
+      if (v && this.torrent?.available && (v.torrent || v.magnet)) {
+        console.log(`[BitTorrent] No app seeders for "${v.title}", trying BitTorrent swarm…`);
+        const ok = await this.torrent.download(v, onProgress);
+        if (ok) {
+          this.videoStore.adoptChunks(videoId);
+          if (this.videoStore.verifyComplete(videoId)) {
+            this.videoStore.markAsSeeding(videoId);
+            this.videoProtocol.announceSeeding(v);
+            this.torrent.seedVideo(v);
+            return v;
+          }
+        }
+      }
+      throw err;
     }
-    throw new Error('Video protocol not initialized');
   }
 
   /**
@@ -1455,6 +1491,7 @@ class P2PNode extends EventEmitter {
   }
 
   async stop() {
+    this.torrent?.stop();
     this.tunnel?.stop();
     this.discovery?.stop();
     this.inbox?.stopPolling();

@@ -1,0 +1,7 @@
+{
+  "name": "webrtc-polyfill",
+  "version": "1.2.2-stub",
+  "type": "module",
+  "main": "index.js",
+  "description": "Stub: desktop BitTorrent talks TCP to uTorrent/qBittorrent peers; no native WebRTC (node-datachannel) needed"
+}

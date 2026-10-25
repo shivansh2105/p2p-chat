@@ -31,7 +31,7 @@ module.exports = async function offlineTest(a, b, makeNode, ok, waitFor, sleep) 
   const store = { m: new Map(), get(k, d) { return this.m.has(k) ? this.m.get(k) : d; }, set(k, v) { this.m.set(k, v); }, delete(k) { this.m.delete(k); } };
   store.set('user', { username: 'bob' });
   store.set('bootstrap', false);
-  store.set('tunnel', false);
+  store.set('tunnel', false); store.set('bittorrent', false);
   const db = { msgs: [], async addMessage() {}, getMessagesSince() { return []; }, updateContactUsername() {} };
   const b2 = new P2PNode(db, store, bobDir);
   await b2.start();
