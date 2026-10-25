@@ -21,6 +21,7 @@ class VideoProtocol extends EventEmitter {
     this.node = node;
     this.videoStore = videoStore;
     this.pendingRequests = new Map();
+    this.discovery = null; // set by P2PNode
   }
 
   async start() {
@@ -123,6 +124,7 @@ class VideoProtocol extends EventEmitter {
       vs.storeChunk(req.chunkHash, data); // verifies sha256
       if (vs.getMissingChunks(video.id).length === 0 && vs.verifyComplete(video.id)) {
         vs.markAsSeeding(video.id);
+        this.announceSeeding(video);
         this.emit('replicaComplete', video);
       }
       return { ok: true };
@@ -281,106 +283,202 @@ class VideoProtocol extends EventEmitter {
     console.log(`[VideoProtocol] Announced: ${video.title}`);
   }
 
-  /**
-   * Search for videos across the network
-   */
-  async searchNetwork(query) {
-    const localResults = this.videoStore.searchVideos(query);
-    const networkResults = [];
-
-    // Query connected peers
-    const peers = this.node.getPeers();
-    const requests = peers.slice(0, 5).map(async (peerId) => {
-      try {
-        const response = await this.sendRequest(peerId, {
-          type: 'SEARCH',
-          query
-        });
-        if (response.results) {
-          networkResults.push(...response.results);
-        }
-      } catch (e) {
-        // Peer didn't respond
-      }
-    });
-
-    await Promise.allSettled(requests);
-
-    // Dedupe and merge results
-    const seen = new Set(localResults.map(v => v.id));
-    const combined = [...localResults];
-    
-    for (const video of networkResults) {
-      if (!seen.has(video.id)) {
-        seen.add(video.id);
-        combined.push(video);
-        if (Array.isArray(video.chunkHashes) && video.contentHash?.slice(0, 16) === video.id) {
-          this.videoStore.addVideoFromNetwork(video);
-        }
-      }
-    }
-
-    return combined;
+  /** Words used for DHT keyword records */
+  static keywords(video) {
+    const words = `${video.title || ''} ${(video.tags || []).join(' ')}`.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) || [];
+    return [...new Set(words)].slice(0, 12);
   }
 
   /**
-   * Download a video from the network
+   * We hold a full verified copy → become a seeder: announce on the DHT under
+   * the video id and each title/tag keyword (so strangers can find it).
    */
-  async downloadVideo(videoId, onProgress) {
-    const video = this.videoStore.getVideo(videoId);
-    if (!video) {
-      throw new Error('Video not found - search first');
+  announceSeeding(video) {
+    if (!this.discovery) return;
+    this.discovery.provide('video:' + video.id);
+    for (const w of VideoProtocol.keywords(video)) this.discovery.provide('kw:' + w);
+  }
+
+  /**
+   * Network-wide search: connected peers + anyone the DHT says has a video
+   * matching a query word (works without knowing the uploader).
+   */
+  async searchNetwork(query) {
+    const localResults = this.videoStore.searchVideos(query);
+    const askPeers = new Set();
+    for (const pid of this.node.getPeers()) {
+      if (askPeers.size >= 10) break;
+      const peer = await this.node.peerStore.get(pid).catch(() => null);
+      if (peer?.protocols.includes(VIDEO_PROTOCOL)) askPeers.add(pid.toString());
     }
 
-    const missing = this.videoStore.getMissingChunks(videoId);
-    if (missing.length === 0) {
-      return video; // Already have it
-    }
-
-    const total = video.chunkHashes.length;
-    let downloaded = total - missing.length;
-
-    // Find peers that have chunks
-    const peers = this.node.getPeers();
-    
-    for (const chunkHash of missing) {
-      // Try each peer until we get the chunk
-      for (const peerId of peers) {
-        try {
-          const response = await this.sendRequest(peerId, {
-            type: 'GET_CHUNK',
-            chunkHash
-          });
-
-          if (response.chunk) {
-            const data = Buffer.from(response.chunk, 'base64');
-            this.videoStore.storeChunk(chunkHash, data);
-            downloaded++;
-            
-            if (onProgress) {
-              onProgress({
-                downloaded,
-                total,
-                percent: Math.round((downloaded / total) * 100)
-              });
-            }
-            break; // Got it, move to next chunk
-          }
-        } catch (e) {
-          // Try next peer
-        }
+    if (this.discovery) {
+      const words = (query.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) || []).slice(0, 3);
+      const found = await Promise.all(words.map((w) => this.discovery.findProviders('kw:' + w, { max: 10 })));
+      for (const prov of found.flat()) {
+        if (askPeers.size >= 25) break;
+        if (await this.discovery.connect(prov)) askPeers.add(prov.id.toString());
       }
     }
 
-    // Check if complete
-    const stillMissing = this.videoStore.getMissingChunks(videoId);
-    if (stillMissing.length === 0) {
-      if (!this.videoStore.verifyComplete(videoId)) throw new Error('Video content hash mismatch');
-      this.videoStore.markAsSeeding(videoId);
-      return video;
-    } else {
-      throw new Error(`Failed to download ${stillMissing.length} chunks`);
+    const networkResults = [];
+    await Promise.allSettled([...askPeers].map(async (peerId) => {
+      const response = await this.sendRequest(peerId, { type: 'SEARCH', query });
+      if (Array.isArray(response.results)) networkResults.push(...response.results);
+    }));
+
+    const seen = new Set(localResults.map(v => v.id));
+    const combined = [...localResults];
+    for (const video of networkResults) {
+      if (seen.has(video.id)) continue;
+      seen.add(video.id);
+      combined.push(video);
+      if (Array.isArray(video.chunkHashes) && video.contentHash?.slice(0, 16) === video.id) {
+        this.videoStore.addVideoFromNetwork(video);
+      }
     }
+    return combined;
+  }
+
+  /** Peers that (probably) have this video: connected peers + DHT seeders */
+  async findSeeders(videoId) {
+    const peers = new Set();
+    for (const pid of this.node.getPeers()) {
+      const peer = await this.node.peerStore.get(pid).catch(() => null);
+      if (peer?.protocols.includes(VIDEO_PROTOCOL)) peers.add(pid.toString());
+    }
+    if (this.discovery) {
+      for (const prov of await this.discovery.findProviders('video:' + videoId, { max: 20 })) {
+        if (await this.discovery.connect(prov)) peers.add(prov.id.toString());
+      }
+    }
+    return [...peers];
+  }
+
+  /**
+   * Swarm download: fetch missing chunks from many seeders in parallel.
+   * Each chunk is hash-verified; finished chunks are servable immediately,
+   * and when complete we become a full seeder.
+   */
+  async downloadVideo(videoId, onProgress) {
+    const video = this.videoStore.getVideo(videoId);
+    if (!video) throw new Error('Video not found - search first');
+
+    const missing = this.videoStore.getMissingChunks(videoId);
+    const total = video.chunkHashes.length;
+    let downloaded = total - missing.length;
+
+    if (missing.length) {
+      const peers = await this.findSeeders(videoId);
+      if (!peers.length) throw new Error('No seeders online for this video');
+      const queue = [...missing];
+      const failures = new Map();
+      const WORKERS = Math.min(6, peers.length * 2, queue.length);
+      let turn = 0;
+
+      const worker = async () => {
+        while (queue.length) {
+          const chunkHash = queue.shift();
+          let got = false;
+          for (let i = 0; i < peers.length && !got; i++) {
+            const peerId = peers[(turn++ + i) % peers.length]; // spread load across seeders
+            try {
+              const r = await this.sendRequest(peerId, { type: 'GET_CHUNK', chunkHash });
+              if (r.chunk) {
+                this.videoStore.storeChunk(chunkHash, Buffer.from(r.chunk, 'base64')); // verifies sha256
+                got = true;
+              }
+            } catch (e) { /* next seeder */ }
+          }
+          if (got) {
+            downloaded++;
+            onProgress?.({ downloaded, total, percent: Math.round((downloaded / total) * 100) });
+          } else {
+            failures.set(chunkHash, (failures.get(chunkHash) || 0) + 1);
+            if (failures.get(chunkHash) < 3) queue.push(chunkHash);
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: WORKERS }, worker));
+      this.videoStore.saveIndex();
+    }
+
+    const stillMissing = this.videoStore.getMissingChunks(videoId);
+    if (stillMissing.length) throw new Error(`Failed to download ${stillMissing.length} chunks`);
+    if (!this.videoStore.verifyComplete(videoId)) throw new Error('Video content hash mismatch');
+
+    this.videoStore.markAsSeeding(videoId);
+    this.videoStore.touch(videoId);
+    this.announceSeeding(video); // every viewer becomes a seeder
+    return video;
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // EVICTION — drop our copy once plenty of other PCs have it
+  // ─────────────────────────────────────────────────────────────
+  evictionSettings() {
+    const st = this.videoStore.store;
+    return {
+      safeCopies: st?.get('videoSafeCopies', 10) ?? 10,      // never delete below this many OTHER copies
+      plentyCopies: st?.get('videoPlentyCopies', 25) ?? 25,  // "lots of people have it"
+      idleMs: st?.get('videoIdleMs', 7 * 24 * 3600 * 1000) ?? 7 * 24 * 3600 * 1000,
+      protectMs: st?.get('videoProtectMs', 24 * 3600 * 1000) ?? 24 * 3600 * 1000 // keep anything watched in last 24h
+    };
+  }
+
+  /**
+   * DHT provider records can't be retracted and linger ~48h, so a record does
+   * NOT mean the peer still has the video. Count only peers that are online
+   * right now AND report holding every chunk.
+   */
+  async countLiveSeeders(video, needed) {
+    if (!this.discovery) return 0;
+    const provs = await this.discovery.findProviders('video:' + video.id, { max: needed * 2 });
+    let live = 0;
+    for (const prov of provs) {
+      if (live >= needed) break;
+      try {
+        if (!(await this.discovery.connect(prov))) continue;
+        const r = await this.sendRequest(prov.id.toString(), { type: 'GET_AVAILABLE_CHUNKS', videoId: video.id });
+        if (Array.isArray(r.chunks) && r.chunks.length === video.chunkHashes.length) live++;
+      } catch (e) { /* offline / not holding */ }
+    }
+    return live;
+  }
+
+  /**
+   * Decide which local copies are safe to delete.
+   *  - storage over 90% of quota → delete best-seeded videos (≥ safeCopies others) until < 80%
+   *  - or a video has ≥ plentyCopies other seeders and nobody here watched it for idleMs
+   */
+  async evictionPass() {
+    const vs = this.videoStore;
+    const cfg = this.evictionSettings();
+    const quota = this.quotaBytes();
+    const now = Date.now();
+    const evicted = [];
+
+    const candidates = vs.getSeedingVideos().filter((v) => now - (v.lastWatched || v.uploadedAt || 0) > cfg.protectMs);
+    const counted = [];
+    for (const v of candidates) {
+      // Need up to plentyCopies confirmations; fewer is fine if we only check safeCopies
+      const others = await this.countLiveSeeders(v, cfg.plentyCopies);
+      counted.push({ v, others });
+    }
+    counted.sort((a, b) => b.others - a.others); // most-seeded first
+
+    for (const { v, others } of counted) {
+      const pressure = vs.getUsedBytes() > quota * 0.9;
+      const plentyAndIdle = others >= cfg.plentyCopies && now - (v.lastWatched || v.uploadedAt || 0) > cfg.idleMs;
+      if ((pressure && others >= cfg.safeCopies) || plentyAndIdle) {
+        vs.removeLocalCopy(v.id);
+        this.discovery?.unprovide('video:' + v.id);
+        evicted.push({ id: v.id, title: v.title, otherCopies: others, reason: pressure ? 'disk quota' : 'plenty of seeders' });
+        console.log(`[Video] Freed space: dropped "${v.title}" (${others} other PCs still have it)`);
+      }
+      if (!pressure && evicted.length && vs.getUsedBytes() < quota * 0.8) break;
+    }
+    return evicted;
   }
 
   /**

@@ -81,6 +81,7 @@ class Inbox {
         if (req.blob.length > MAX_BLOB) return { ok: false, error: 'too large' };
         if (ms.getStats && Number(ms.getStats().totalSizeKB) * 1024 > MAX_TOTAL_BYTES) return { ok: false, error: 'full' };
         ms.storeMessage(req.recipient, req.blob, from, req.id);
+        this.p2p.discovery?.provide('inbox:' + req.recipient); // "I hold mail for <recipient>"
         return { ok: true };
       }
       case 'FETCH':
@@ -91,6 +92,34 @@ class Inbox {
       default:
         return { error: 'unknown type' };
     }
+  }
+
+  /**
+   * When we come online, look up on the DHT which PCs hold mail for us and
+   * connect to them (connecting triggers fetchFrom). Repeats every 10 min.
+   */
+  startPolling(intervalMs = 10 * 60 * 1000) {
+    const poll = () => this.findMyMail().catch(() => {});
+    this.pollFirst = setTimeout(poll, 5000);
+    this.pollTimer = setInterval(poll, intervalMs);
+    this.pollFirst.unref?.(); this.pollTimer.unref?.();
+  }
+
+  stopPolling() {
+    clearTimeout(this.pollFirst);
+    clearInterval(this.pollTimer);
+  }
+
+  async findMyMail() {
+    if (!this.p2p.discovery) return 0;
+    const holders = await this.p2p.discovery.findProviders('inbox:' + this.p2p.peerId, { max: 10 });
+    let n = 0;
+    for (const h of holders) {
+      const id = h.id.toString();
+      if (this.p2p.connectedPeers.has(id)) { n += await this.fetchFrom(id).catch(() => 0); continue; }
+      if (await this.p2p.discovery.connect(h)) n++; // peer:connect → onPeerConnected → fetchFrom
+    }
+    return n;
   }
 
   /** Called on every new connection */
@@ -133,11 +162,11 @@ class Inbox {
     let copies = 0;
     // 1) Keep a copy ourselves (we're a holder too)
     this.p2p.messageStore.storeMessage(recipientId, sealed, this.p2p.peerId, id);
+    this.p2p.discovery?.provide('inbox:' + recipientId);
     copies++;
     // 2) Replicate to other online peers
-    const holders = this.p2p.getConnectedPeers()
-      .map((p) => (typeof p === 'string' ? p : p.id))
-      .filter((p) => p && p !== recipientId)
+    const holders = (await this.p2p.getAppPeers(INBOX_PROTOCOL))
+      .filter((p) => p !== recipientId)
       .slice(0, REPLICAS);
     await Promise.allSettled(holders.map(async (h) => {
       const r = await request(this.p2p.node, h, INBOX_PROTOCOL, { type: 'STORE', recipient: recipientId, blob: sealed, id });

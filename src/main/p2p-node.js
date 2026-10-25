@@ -110,7 +110,7 @@ class P2PNode extends EventEmitter {
 
     const {
       createLibp2p, tcp, webSockets, noise, yamux, identify, kadDHT, gossipsub, mdns,
-      circuitRelayTransport, circuitRelayServer, autoNAT, dcutr, bootstrap
+      circuitRelayTransport, circuitRelayServer, autoNAT, dcutr, bootstrap, passthroughMapper
     } = await loadEsm();
 
     // Persistent libp2p identity → same Peer ID across restarts
@@ -172,6 +172,9 @@ class P2PNode extends EventEmitter {
         // ═══════════════════════════════════════════════════════════
         dht: kadDHT({
           clientMode: false,           // We ARE the DHT network
+          // Default mapper drops peers with private IPs → LAN users (and
+          // NAT'd PCs before they get a relay address) never enter the routing table
+          peerInfoMapper: passthroughMapper,
           kBucketSize: 20,             // Standard Kademlia bucket size
           randomWalk: {
             enabled: true,             // Actively explore network
@@ -202,21 +205,20 @@ class P2PNode extends EventEmitter {
       
       // LOCAL DISCOVERY - Zero config on same network
       peerDiscovery: [
-        mdns({
+        ...((this.store?.get('mdns', true) ?? true) ? [mdns({
           interval: 10000,
           broadcast: true,
           serviceTag: 'p2p-chat.local'
-        }),
+        })] : []),
         // Bootstrap from public libp2p nodes (for internet discovery)
-        bootstrap({
-          list: BOOTSTRAP_NODES,
-          timeout: 3000
-        })
+        ...((this.store?.get('bootstrap', true) ?? true)
+          ? [bootstrap({ list: BOOTSTRAP_NODES, timeout: 3000 })]
+          : [])
       ],
       
       connectionManager: {
         minConnections: 3,
-        maxConnections: 50,
+        maxConnections: 300,   // public DHT uses many; too low prunes relay links
         autoDialInterval: 30000
       }
     });
@@ -249,10 +251,16 @@ class P2PNode extends EventEmitter {
     // Initialize Tailscale-inspired crypto and naming
     await this.initializeCrypto();
 
+    // DHT "tracker": who has which video / who holds whose messages
+    const { Discovery } = require('./discovery');
+    this.discovery = new Discovery(this);
+    this.discovery.start();
+
     // Offline inbox (store-and-forward on volunteer PCs)
     const { Inbox } = require('./inbox');
     this.inbox = new Inbox(this);
     await this.inbox.start();
+    this.inbox.startPolling();
     
     // Initialize relay server and client (volunteer node support)
     await this.initializeRelay();
@@ -877,6 +885,21 @@ class P2PNode extends EventEmitter {
     return Array.from(this.connectedPeers.values());
   }
 
+  /**
+   * Connected peers that run OUR app (support <protocol>). Excludes public
+   * IPFS/bootstrap nodes we're connected to for DHT/relay purposes.
+   */
+  async getAppPeers(protocol) {
+    const out = [];
+    for (const { id } of this.connectedPeers.values()) {
+      try {
+        const peer = await this.node.peerStore.get(esm().peerIdFromString(id));
+        if (peer.protocols.includes(protocol)) out.push(id);
+      } catch (e) { /* unknown yet */ }
+    }
+    return out;
+  }
+
   getNodeInfo() {
     return {
       peerId: this.peerId,
@@ -1006,7 +1029,15 @@ class P2PNode extends EventEmitter {
     try {
       const { VideoProtocol } = require('./video-protocol');
       this.videoProtocol = new VideoProtocol(this.node, this.videoStore);
+      this.videoProtocol.discovery = this.discovery;
       await this.videoProtocol.start();
+      for (const v of this.videoStore.getSeedingVideos()) this.videoProtocol.announceSeeding(v);
+
+      // Free disk space when lots of other PCs already seed a video
+      this.evictionTimer = setInterval(() => {
+        this.videoProtocol.evictionPass().catch(() => {});
+      }, 30 * 60 * 1000);
+      this.evictionTimer.unref?.();
       
       // Re-queue our uploads that never reached 3 replicas
       this.pendingReplication = new Set(
@@ -1037,9 +1068,10 @@ class P2PNode extends EventEmitter {
       uploaderName: this.username
     });
     
-    // Announce to network
+    // Announce to network: gossip to neighbours + DHT seeder/keyword records
     if (this.videoProtocol) {
-      await this.videoProtocol.announceVideo(video);
+      await this.videoProtocol.announceVideo(video).catch(() => {});
+      this.videoProtocol.announceSeeding(video);
     }
     
     // REPLICATE to other peers (like BitTorrent seeding)
@@ -1056,9 +1088,9 @@ class P2PNode extends EventEmitter {
   async replicateVideo(video, target = 3) {
     if (!this.videoProtocol) return 0;
     const done = new Set(video.replicas || []);
-    const candidates = this.getConnectedPeers()
-      .map((p) => p.id)
-      .filter((id) => id && !done.has(id));
+    const { VIDEO_SYNC_PROTOCOL } = require('./video-protocol');
+    const candidates = (await this.getAppPeers(VIDEO_SYNC_PROTOCOL))
+      .filter((id) => !done.has(id));
 
     for (const peerId of candidates) {
       if (done.size >= target) break;
@@ -1351,6 +1383,10 @@ class P2PNode extends EventEmitter {
   }
 
   async stop() {
+    this.discovery?.stop();
+    this.inbox?.stopPolling();
+    if (this.evictionTimer) clearInterval(this.evictionTimer);
+    this.messageStore?.stop?.();
     if (this.node) {
       const pubsub = this.node.services.pubsub;
       await pubsub.publish(

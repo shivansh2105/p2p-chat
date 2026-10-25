@@ -22,7 +22,7 @@ async function loadEsm() {
   if (mods) return mods;
   const [
     libp2p, tcp, ws, noise, yamux, identify, dht, gossipsub, mdns,
-    relay, autonat, dcutr, bootstrap, maddr, peerId, keys
+    relay, autonat, dcutr, bootstrap, maddr, peerId, keys, cid, sha2
   ] = await Promise.all([
     import('libp2p'),
     import('@libp2p/tcp'),
@@ -39,7 +39,9 @@ async function loadEsm() {
     import('@libp2p/bootstrap'),
     import('@multiformats/multiaddr'),
     import('@libp2p/peer-id'),
-    import('@libp2p/crypto/keys')
+    import('@libp2p/crypto/keys'),
+    import('multiformats/cid'),
+    import('multiformats/hashes/sha2')
   ]);
   mods = {
     createLibp2p: libp2p.createLibp2p,
@@ -49,6 +51,7 @@ async function loadEsm() {
     yamux: yamux.yamux,
     identify: identify.identify,
     kadDHT: dht.kadDHT,
+    passthroughMapper: dht.passthroughMapper,
     gossipsub: gossipsub.gossipsub,
     mdns: mdns.mdns,
     circuitRelayTransport: relay.circuitRelayTransport,
@@ -60,7 +63,9 @@ async function loadEsm() {
     peerIdFromString: peerId.peerIdFromString,
     generateKeyPair: keys.generateKeyPair,
     privateKeyToProtobuf: keys.privateKeyToProtobuf,
-    privateKeyFromProtobuf: keys.privateKeyFromProtobuf
+    privateKeyFromProtobuf: keys.privateKeyFromProtobuf,
+    CID: cid.CID,
+    sha256: sha2.sha256
   };
   return mods;
 }

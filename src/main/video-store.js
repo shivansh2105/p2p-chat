@@ -208,6 +208,7 @@ class VideoStore extends EventEmitter {
    * Record that we have all chunks for a video (we can seed it)
    */
   markAsSeeding(videoId) {
+    if (this.seeding.has(videoId)) return;
     this.seeding.add(videoId);
     const video = this.videos.get(videoId);
     if (video) {
@@ -259,6 +260,35 @@ class VideoStore extends EventEmitter {
     const buffer = this.assembleVideo(videoId);
     fs.writeFileSync(outputPath, buffer);
     return outputPath;
+  }
+
+  /** Record that the user watched/used this video (protects it from eviction) */
+  touch(videoId) {
+    const v = this.videos.get(videoId);
+    if (v) { v.lastWatched = Date.now(); this.saveIndex(); }
+  }
+
+  /**
+   * Delete our chunk files for a video but keep its metadata, so it still
+   * shows in search and can be re-downloaded from the swarm.
+   */
+  removeLocalCopy(videoId) {
+    const video = this.videos.get(videoId);
+    if (!video) return;
+    const stillNeeded = new Set();
+    for (const id of this.seeding) {
+      if (id === videoId) continue;
+      for (const h of this.videos.get(id)?.chunkHashes || []) stillNeeded.add(h);
+    }
+    for (const h of video.chunkHashes) {
+      if (stillNeeded.has(h)) continue;
+      const p = this.chunks.get(h);
+      try { if (p && fs.existsSync(p)) fs.unlinkSync(p); } catch {}
+      this.chunks.delete(h);
+    }
+    this.seeding.delete(videoId);
+    video.evictedAt = Date.now();
+    this.saveIndex();
   }
 
   /** Bytes of chunk data on disk */
