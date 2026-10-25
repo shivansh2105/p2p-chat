@@ -7,7 +7,13 @@
  * - Selective restore
  */
 
-const { google } = require('googleapis');
+// Slim official Drive client (full 'googleapis' is ~100MB). Loaded lazily so a
+// problem with it can never stop the app from starting.
+let _gd;
+const google = {
+  get auth() { _gd ||= require('@googleapis/drive'); return _gd.auth; },
+  drive(opts) { _gd ||= require('@googleapis/drive'); return _gd.drive(opts); }
+};
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');

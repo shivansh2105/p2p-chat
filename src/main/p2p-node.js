@@ -1104,7 +1104,7 @@ class P2PNode extends EventEmitter {
     const video = await this.videoStore.uploadVideo(filePath, {
       ...metadata,
       uploader: this.peerId,
-      uploaderName: this.username
+      uploaderName: metadata.uploaderName || this.store?.get('user')?.username || 'anonymous'
     });
     
     // Announce to network: gossip to neighbours + DHT seeder/keyword records

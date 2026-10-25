@@ -8,9 +8,9 @@ Chat and video sharing with **no central server**, built like BitTorrent: every 
 |---|---|---|
 | 💬 | **Encrypted chat** | Direct peer-to-peer. Ed25519 identity, X25519 per-chat keys, AES-256-GCM |
 | 📭 | **Offline messages** | Friend offline? The message is sealed to their key and stored on up to 5 other PCs. They get it when they're back, even if you're offline by then. The PCs holding it can't read it |
-| 🎬 | **Video sharing** | Upload → split into 256 KB chunks → copied to 3 PCs. It stays watchable after the uploader goes offline |
+| 🎬 | **Video sharing** (desktop 🎬 tab + phone Videos tab) | Upload → split into 256 KB chunks → copied to 3 PCs. It stays watchable after the uploader goes offline |
 | 🔍 | **Network-wide search** | Find videos by title or tag across the whole network, not just your contacts |
-| 🌱 | **Every viewer seeds** | Watching a video makes you a seeder. Downloads pull chunks from many seeders in parallel |
+| 🌱 | **Every viewer seeds** | Watching a video makes you a seeder. Desktop streams while downloading (playback starts after the first chunks), pulling from many seeders in parallel |
 | 🧹 | **Smart cleanup** | Your copy is deleted only if your disk is >90% of quota and ≥10 other PCs are confirmed live seeders, or ≥25 are and you haven't watched it in 7 days |
 | 🔗 | **Works behind NAT** | UPnP opens a port on home routers, IPv6 needs no NAT, otherwise relay via another PC → hole punching. Falls back to public IPFS relays when no app user can relay |
 | 🙋 | **Usernames** | Find people by @username via the DHT |
@@ -95,7 +95,6 @@ cd android && ./gradlew assembleDebug
 
 ## Limitations (honest)
 
-- **The desktop UI has no video screens yet.** Video features work in the networking layer (`uploadVideo`, `searchVideos`, `downloadVideo`) and are covered by tests, but there are no buttons for them yet.
 - **The phone needs one PC address to join.** The first time, paste a PC's address (Network tab). After that, the rest of the network is found automatically. Phones seed only while the app is open.
 - **No video compression.** Videos are stored at their original size.
 - **Strict NAT on both sides** (common on mobile data): video then needs an app user's PC with an open port to relay. Public relays only carry small amounts of data (~128 KB / 2 min).

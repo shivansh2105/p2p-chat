@@ -45,6 +45,7 @@
     "@chainsafe/libp2p-gossipsub": "^14.1.2",
     "@chainsafe/libp2p-noise": "^16.1.0",
     "@chainsafe/libp2p-yamux": "^7.0.1",
+    "@googleapis/drive": "^8.16.0",
     "@libp2p/autonat": "~2.0.38",
     "@libp2p/bootstrap": "^11.0.11",
     "@libp2p/circuit-relay-v2": "~3.2.24",

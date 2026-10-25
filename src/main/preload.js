@@ -90,6 +90,17 @@ contextBridge.exposeInMainWorld('api', {
     create: (name, memberIds) => ipcRenderer.invoke('group:create', name, memberIds)
   },
 
+  // Videos (P2P, BitTorrent-style)
+  video: {
+    upload: (meta) => ipcRenderer.invoke('video:upload', meta),
+    search: (q) => ipcRenderer.invoke('video:search', q),
+    library: () => ipcRenderer.invoke('video:library'),
+    watch: (id) => ipcRenderer.invoke('video:watch', id),
+    stats: () => ipcRenderer.invoke('video:stats'),
+    setStorage: (opts) => ipcRenderer.invoke('video:setStorage', opts),
+    onProgress: (cb) => ipcRenderer.on('video:progress', (_, p) => cb(p))
+  },
+
   // Backup
   backup: {
     getStatus: () => ipcRenderer.invoke('backup:getStatus'),

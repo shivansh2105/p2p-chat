@@ -1,4 +1,10 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, protocol } = require('electron');
+
+// p2pvideo://v/<id> — streams video bytes straight from the chunk store,
+// fetching missing chunks from the swarm on demand (play before fully downloaded)
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'p2pvideo', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } }
+]);
 const path = require('path');
 const { P2PNode } = require('./p2p-node');
 const { Database } = require('./database');
@@ -6,6 +12,13 @@ const { GoogleDriveBackup } = require('./google-drive');
 const Store = require('electron-store');
 
 const store = new Store();
+
+// IPC handlers are registered immediately (so the window never hits "No handler
+// registered"), but each call waits until the P2P node has finished starting.
+let markReady;
+const ready = new Promise((r) => (markReady = r));
+const rawHandle = ipcMain.handle.bind(ipcMain);
+ipcMain.handle = (channel, fn) => rawHandle(channel, async (...args) => { await ready; return fn(...args); });
 let mainWindow;
 let p2pNode;
 let database;
@@ -47,8 +60,94 @@ async function initializeApp() {
   // Initialize Google Drive backup
   driveBackup = new GoogleDriveBackup(database, store);
 
-  // Set up IPC handlers
-  setupIpcHandlers();
+  forwardP2PEvents();
+  markReady();
+}
+
+// ─────────────────────────── VIDEO ───────────────────────────
+const summarize = (v) => v && ({
+  id: v.id, title: v.title, description: v.description, tags: v.tags || [], size: v.size,
+  chunkCount: v.chunkCount, mimeType: v.mimeType, uploaderName: v.uploaderName,
+  uploadedAt: v.uploadedAt, replicas: (v.replicas || []).length,
+  local: p2pNode.videoStore.seeding.has(v.id),
+  have: p2pNode.videoStore.getAvailableChunks(v.id).length
+});
+
+function setupVideo() {
+  const vs = new Proxy({}, { get: (_, k) => { const t = p2pNode.videoStore; const v = t[k]; return typeof v === 'function' ? v.bind(t) : v; } });
+
+  protocol.handle('p2pvideo', async (req) => {
+    await ready;
+    try {
+      const id = new URL(req.url).pathname.replace(/^\//, '');
+      const v = vs.getVideo(id);
+      if (!v) return new Response('not found', { status: 404 });
+      const CS = v.chunkSize || 256 * 1024;
+      const m = /bytes=(\d*)-(\d*)/.exec(req.headers.get('range') || '');
+      let start = m && m[1] ? Number(m[1]) : 0;
+      // Serve ~2MB per request so playback starts fast; the player asks for more
+      let end = m && m[2] ? Math.min(Number(m[2]), v.size - 1) : Math.min(start + 2 * 1024 * 1024 - 1, v.size - 1);
+      if (start >= v.size) return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${v.size}` } });
+      const first = Math.floor(start / CS), last = Math.floor(end / CS);
+      const hashes = v.chunkHashes.slice(first, last + 1);
+      await p2pNode.videoProtocol.ensureChunks(id, hashes);
+      const buf = Buffer.concat(hashes.map((h) => vs.getChunk(h))).subarray(start - first * CS, end - first * CS + 1);
+      return new Response(buf, {
+        status: 206,
+        headers: {
+          'Content-Type': v.mimeType || 'video/mp4', 'Content-Length': String(buf.length),
+          'Content-Range': `bytes ${start}-${end}/${v.size}`, 'Accept-Ranges': 'bytes'
+        }
+      });
+    } catch (e) {
+      return new Response(String(e.message), { status: 503 });
+    }
+  });
+
+  ipcMain.handle('video:upload', async (_, meta = {}) => {
+    const r = await dialog.showOpenDialog(mainWindow, {
+      title: 'Upload a video', properties: ['openFile'],
+      filters: [{ name: 'Videos', extensions: ['mp4', 'webm', 'mkv', 'mov', 'm4v', 'avi'] }]
+    });
+    if (r.canceled || !r.filePaths[0]) return null;
+    const title = String(meta.title || '').slice(0, 120) || path.basename(r.filePaths[0]);
+    const tags = (Array.isArray(meta.tags) ? meta.tags : []).map((t) => String(t).slice(0, 30)).slice(0, 10);
+    const v = await p2pNode.uploadVideo(r.filePaths[0], { title, tags, description: String(meta.description || '').slice(0, 1000) });
+    vs.touch(v.id);
+    return summarize(v);
+  });
+
+  ipcMain.handle('video:search', async (_, q) => {
+    const results = await p2pNode.searchVideos(String(q || '').slice(0, 100));
+    return results.map((r) => summarize(vs.getVideo(r.id) || r)).filter(Boolean);
+  });
+
+  ipcMain.handle('video:library', () => vs.getAllVideos().map(summarize));
+
+  ipcMain.handle('video:watch', (_, id) => {
+    const v = vs.getVideo(String(id));
+    if (!v) throw new Error('Unknown video');
+    vs.touch(v.id);
+    // Keep downloading in the background → becomes a full seeder
+    if (!vs.seeding.has(v.id)) {
+      p2pNode.downloadVideo(v.id, (p) => mainWindow?.webContents.send('video:progress', { id: v.id, ...p }))
+        .then(() => mainWindow?.webContents.send('video:progress', { id: v.id, percent: 100, done: true }))
+        .catch((e) => mainWindow?.webContents.send('video:progress', { id: v.id, error: e.message }));
+    }
+    return `p2pvideo://v/${v.id}`;
+  });
+
+  ipcMain.handle('video:stats', () => ({
+    ...p2pNode.getVideoStats(),
+    storageEnabled: store.get('storageEnabled', true),
+    quotaMB: store.get('storageQuotaMB', 5120)
+  }));
+
+  ipcMain.handle('video:setStorage', (_, { enabled, quotaMB } = {}) => {
+    if (typeof enabled === 'boolean') store.set('storageEnabled', enabled);
+    if (Number.isFinite(quotaMB) && quotaMB >= 100 && quotaMB <= 1024 * 1024) store.set('storageQuotaMB', Math.round(quotaMB));
+    return true;
+  });
 }
 
 function setupIpcHandlers() {
@@ -253,7 +352,10 @@ function setupIpcHandlers() {
     if (enabled) driveBackup.startAutoBackup();
     else driveBackup.stopAutoBackup();
   });
+}
 
+// P2P → renderer events (needs a started node)
+function forwardP2PEvents() {
   // P2P events to renderer
   p2pNode.on('message', (message) => {
     mainWindow.webContents.send('chat:newMessage', message);
@@ -282,6 +384,8 @@ function setupIpcHandlers() {
 }
 
 app.whenReady().then(async () => {
+  setupIpcHandlers();
+  setupVideo();
   createWindow();
   await initializeApp();
 

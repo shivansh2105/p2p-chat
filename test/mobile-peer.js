@@ -11,8 +11,9 @@ const { P2PNode } = require('../src/main/p2p-node');
   const n = new P2PNode({ async addMessage() {}, getMessagesSince() { return []; }, updateContactUsername() {} }, store, dir);
   await n.start();
 
-  const file = path.join(dir, 'clip.mp4');
-  fs.writeFileSync(file, crypto.randomBytes(1024 * 1024 + 777));
+  // VIDEO_FILE=<real.mp4> uploads a playable video (for player tests)
+  const file = process.env.VIDEO_FILE || path.join(dir, 'clip.mp4');
+  if (!process.env.VIDEO_FILE) fs.writeFileSync(file, crypto.randomBytes(1024 * 1024 + 777));
   await n.uploadVideo(file, { title: 'desktop clip', tags: ['desktop'] });
 
   n.on('message', async (m) => {

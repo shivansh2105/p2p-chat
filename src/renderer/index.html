@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; media-src 'self' p2pvideo:;">
   <title>P2P Chat - Decentralized Messenger</title>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -70,6 +70,7 @@
         </div>
 
         <div class="sidebar-footer">
+          <button class="action-btn videos-btn" id="videosBtn" title="Videos">🎬</button>
           <button class="action-btn" id="newChatBtn" title="New Chat">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M12 5v14M5 12h14"/>
@@ -91,6 +92,34 @@
             <h3>Your Peer ID</h3>
             <code id="peerIdDisplay">Loading...</code>
             <button class="copy-btn" onclick="copyPeerId()">Copy</button>
+          </div>
+        </div>
+
+        <!-- Videos -->
+        <div class="videos-panel" id="videosPanel" style="display: none;">
+          <div class="chat-header">
+            <button class="back-btn" id="videosBackBtn" style="display:inline-block">←</button>
+            <div class="chat-header-text"><h3>Videos</h3><span id="videoStats">P2P video network</span></div>
+          </div>
+          <div class="videos-body">
+            <div class="video-search">
+              <input type="text" id="videoSearchInput" placeholder="Search videos on the network…" autocomplete="off">
+              <button class="primary-btn" id="videoSearchBtn">Search</button>
+            </div>
+            <div class="video-player" id="videoPlayer" style="display:none">
+              <video id="videoEl" controls></video>
+              <div class="video-player-info"><h3 id="videoTitle"></h3><span id="videoProgress" class="hint"></span></div>
+            </div>
+            <h4 id="videoListTitle">Your library</h4>
+            <div class="video-list" id="videoList"></div>
+            <div class="video-upload">
+              <h4>Upload a video</h4>
+              <input type="text" id="videoTitleInput" placeholder="Title" maxlength="120">
+              <input type="text" id="videoTagsInput" placeholder="Tags, comma separated">
+              <button class="primary-btn" id="videoUploadBtn">Choose file &amp; upload</button>
+              <p class="hint">Copies are pushed to up to 3 other PCs, so it stays watchable when you're offline.</p>
+              <label class="storage-row"><input type="checkbox" id="storageToggle"> Store &amp; seed videos for others (up to <input type="number" id="quotaInput" min="100" step="100"> MB)</label>
+            </div>
           </div>
         </div>
 

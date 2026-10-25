@@ -304,44 +304,41 @@ class VideoProtocol extends EventEmitter {
   }
 
   /**
-   * Network-wide search: connected peers + anyone the DHT says has a video
-   * matching a query word (works without knowing the uploader).
+   * Network-wide search: connected app peers are asked immediately; in
+   * parallel the DHT keyword records find seeders we're not connected to.
+   * Hard deadline so the UI never hangs on slow public-DHT lookups.
    */
-  async searchNetwork(query) {
-    const localResults = this.videoStore.searchVideos(query);
-    const askPeers = new Set();
-    for (const pid of this.node.getPeers()) {
-      if (askPeers.size >= 10) break;
-      const peer = await this.node.peerStore.get(pid).catch(() => null);
-      if (peer?.protocols.includes(VIDEO_PROTOCOL)) askPeers.add(pid.toString());
-    }
+  async searchNetwork(query, { deadlineMs = 12000 } = {}) {
+    const results = new Map(this.videoStore.searchVideos(query).map((v) => [v.id, v]));
+    const asked = new Set();
+    const ask = async (peerId) => {
+      if (asked.has(peerId) || asked.size >= 25) return;
+      asked.add(peerId);
+      try {
+        const r = await this.sendRequest(peerId, { type: 'SEARCH', query }, 8000);
+        for (const v of r.results || []) {
+          if (results.has(v.id) || !Array.isArray(v.chunkHashes) || v.contentHash?.slice(0, 16) !== v.id) continue;
+          results.set(v.id, v);
+          this.videoStore.addVideoFromNetwork(v);
+        }
+      } catch (e) { /* peer slow/offline */ }
+    };
 
+    const jobs = [];
+    for (const pid of this.node.getPeers()) {
+      const peer = await this.node.peerStore.get(pid).catch(() => null);
+      if (peer?.protocols.includes(VIDEO_PROTOCOL)) jobs.push(ask(pid.toString()));
+    }
     if (this.discovery) {
       const words = (query.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) || []).slice(0, 3);
-      const found = await Promise.all(words.map((w) => this.discovery.findProviders('kw:' + w, { max: 10 })));
-      for (const prov of found.flat()) {
-        if (askPeers.size >= 25) break;
-        if (await this.discovery.connect(prov)) askPeers.add(prov.id.toString());
-      }
+      jobs.push(...words.map(async (w) => {
+        for (const prov of await this.discovery.findProviders('kw:' + w, { max: 10, timeout: deadlineMs - 2000 })) {
+          if (await this.discovery.connect(prov)) await ask(prov.id.toString());
+        }
+      }));
     }
-
-    const networkResults = [];
-    await Promise.allSettled([...askPeers].map(async (peerId) => {
-      const response = await this.sendRequest(peerId, { type: 'SEARCH', query });
-      if (Array.isArray(response.results)) networkResults.push(...response.results);
-    }));
-
-    const seen = new Set(localResults.map(v => v.id));
-    const combined = [...localResults];
-    for (const video of networkResults) {
-      if (seen.has(video.id)) continue;
-      seen.add(video.id);
-      combined.push(video);
-      if (Array.isArray(video.chunkHashes) && video.contentHash?.slice(0, 16) === video.id) {
-        this.videoStore.addVideoFromNetwork(video);
-      }
-    }
-    return combined;
+    await Promise.race([Promise.allSettled(jobs), new Promise((r) => setTimeout(r, deadlineMs))]);
+    return [...results.values()];
   }
 
   /** Peers that (probably) have this video: connected peers + DHT seeders */
@@ -351,12 +348,54 @@ class VideoProtocol extends EventEmitter {
       const peer = await this.node.peerStore.get(pid).catch(() => null);
       if (peer?.protocols.includes(VIDEO_PROTOCOL)) peers.add(pid.toString());
     }
+    // Already-connected seeders are enough to start; DHT lookup adds more
     if (this.discovery) {
-      for (const prov of await this.discovery.findProviders('video:' + videoId, { max: 20 })) {
-        if (await this.discovery.connect(prov)) peers.add(prov.id.toString());
-      }
+      const dht = (async () => {
+        for (const prov of await this.discovery.findProviders('video:' + videoId, { max: 20, timeout: 10000 })) {
+          if (await this.discovery.connect(prov)) peers.add(prov.id.toString());
+        }
+      })();
+      await (peers.size ? Promise.race([dht, new Promise((r) => setTimeout(r, 2000))]) : dht);
     }
     return [...peers];
+  }
+
+  /** Seeder list cached for a minute (DHT lookups are slow) */
+  async seedersCached(videoId) {
+    this._seedCache ||= new Map();
+    const c = this._seedCache.get(videoId);
+    if (c && Date.now() - c.t < 60000 && c.peers.length) return c.peers;
+    const peers = await this.findSeeders(videoId);
+    this._seedCache.set(videoId, { t: Date.now(), peers });
+    return peers;
+  }
+
+  /** Fetch one chunk from any seeder (deduplicates concurrent requests) */
+  fetchChunk(hash, peers) {
+    if (this.videoStore.hasChunk(hash)) return Promise.resolve();
+    this._inflight ||= new Map();
+    if (this._inflight.has(hash)) return this._inflight.get(hash);
+    const start = Math.floor(Math.random() * Math.max(peers.length, 1));
+    const job = (async () => {
+      for (let i = 0; i < peers.length; i++) {
+        try {
+          const r = await this.sendRequest(peers[(start + i) % peers.length], { type: 'GET_CHUNK', chunkHash: hash });
+          if (r.chunk) { this.videoStore.storeChunk(hash, Buffer.from(r.chunk, 'base64')); return; }
+        } catch (e) { /* next seeder */ }
+      }
+      throw new Error('No seeder had chunk ' + hash.slice(0, 8));
+    })().finally(() => this._inflight.delete(hash));
+    this._inflight.set(hash, job);
+    return job;
+  }
+
+  /** Make sure these chunks are on disk (used by the streaming player) */
+  async ensureChunks(videoId, hashes) {
+    const missing = hashes.filter((h) => !this.videoStore.hasChunk(h));
+    if (!missing.length) return;
+    const peers = await this.seedersCached(videoId);
+    if (!peers.length) throw new Error('No seeders online');
+    await Promise.all(missing.map((h) => this.fetchChunk(h, peers)));
   }
 
   /**
@@ -489,16 +528,19 @@ class VideoProtocol extends EventEmitter {
    * Send request to peer
    */
   async sendRequest(peerId, request, timeout = 30000) {
-    const stream = await this.node.dialProtocol(peerId, VIDEO_PROTOCOL, { preferDirect: true });
-    
-    await stream.sink([Buffer.from(JSON.stringify(request))]);
-    
-    const chunks = [];
-    for await (const chunk of stream.source) {
-      chunks.push(Buffer.from(chunk.subarray()));
+    const signal = AbortSignal.timeout(timeout);
+    const stream = await this.node.dialProtocol(peerId, VIDEO_PROTOCOL, { preferDirect: true, signal });
+    const abort = () => stream.abort?.(new Error('request timed out'));
+    signal.addEventListener('abort', abort, { once: true });
+    try {
+      await stream.sink([Buffer.from(JSON.stringify(request))]);
+      const chunks = [];
+      for await (const chunk of stream.source) chunks.push(Buffer.from(chunk.subarray()));
+      if (signal.aborted) throw new Error('request timed out');
+      return JSON.parse(Buffer.concat(chunks).toString() || '{}');
+    } finally {
+      signal.removeEventListener('abort', abort);
     }
-    
-    return JSON.parse(Buffer.concat(chunks).toString());
   }
 }
 

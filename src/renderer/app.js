@@ -46,6 +46,7 @@ function setupEventListeners() {
   // Menu
   document.getElementById('menuBtn').addEventListener('click', toggleMenu);
   document.getElementById('newChatBtn').addEventListener('click', () => openModal('newChatModal'));
+  setupVideos();
 
   // Chat input
   document.getElementById('sendBtn').addEventListener('click', sendMessage);
@@ -813,4 +814,114 @@ function escapeHtml(text) {
 // Request notification permission
 if ('Notification' in window && Notification.permission === 'default') {
   Notification.requestPermission();
+}
+
+
+// ═══════════════════════════ VIDEOS ═══════════════════════════
+const vEsc = (t) => { const d = document.createElement('div'); d.textContent = t ?? ''; return d.innerHTML; };
+const vSize = (b) => (b >= 1073741824 ? (b / 1073741824).toFixed(1) + ' GB' : (b / 1048576).toFixed(1) + ' MB');
+let videoItems = [];
+let playingId = null;
+
+function setupVideos() {
+  const $ = (id) => document.getElementById(id);
+  $('videosBtn').addEventListener('click', openVideos);
+  $('videosBackBtn').addEventListener('click', closeVideos);
+  $('videoSearchBtn').addEventListener('click', searchVideos);
+  $('videoSearchInput').addEventListener('keypress', (e) => e.key === 'Enter' && searchVideos());
+  $('videoUploadBtn').addEventListener('click', uploadVideo);
+  $('videoList').addEventListener('click', (e) => {
+    const id = e.target.closest('[data-video]')?.dataset.video;
+    if (id) playVideo(id);
+  });
+  $('storageToggle').addEventListener('change', (e) => window.api.video.setStorage({ enabled: e.target.checked }));
+  $('quotaInput').addEventListener('change', (e) => window.api.video.setStorage({ quotaMB: Number(e.target.value) }));
+  window.api.video.onProgress((p) => {
+    if (p.id !== playingId) return;
+    $('videoProgress').textContent = p.error ? `⚠ ${p.error}` : p.done ? '✓ Downloaded — you are now seeding this video' : `Downloading ${p.percent}%`;
+  });
+}
+
+async function openVideos() {
+  document.getElementById('chatEmpty').style.display = 'none';
+  document.getElementById('activeChat').style.display = 'none';
+  document.getElementById('videosPanel').style.display = 'flex';
+  document.getElementById('chatArea').classList.add('open');
+  await refreshVideoStats();
+  await showLibrary();
+}
+
+function closeVideos() {
+  document.getElementById('videosPanel').style.display = 'none';
+  document.getElementById('chatArea').classList.remove('open');
+  document.getElementById('chatEmpty').style.display = 'flex';
+  const el = document.getElementById('videoEl'); el.pause();
+}
+
+async function refreshVideoStats() {
+  const s = await window.api.video.stats();
+  document.getElementById('videoStats').textContent = `Seeding ${s.videosSeeding} · ${s.totalSizeMB} MB used · ${s.videosKnown} known`;
+  document.getElementById('storageToggle').checked = s.storageEnabled;
+  document.getElementById('quotaInput').value = s.quotaMB;
+}
+
+function renderVideoList(items, emptyText) {
+  videoItems = items;
+  document.getElementById('videoList').innerHTML = items.length ? items.map((v) => `
+    <div class="video-item" data-video="${vEsc(v.id)}">
+      <div class="video-thumb">▶</div>
+      <div class="video-meta">
+        <div class="video-name">${vEsc(v.title)}</div>
+        <div class="hint">${vSize(v.size)} · ${vEsc(v.uploaderName || 'unknown')}${v.local ? ' · ✓ seeding' : v.have ? ` · ${Math.round((v.have / v.chunkCount) * 100)}% local` : ''}${(v.tags || []).length ? ' · #' + v.tags.map(vEsc).join(' #') : ''}</div>
+      </div>
+    </div>`).join('') : `<p class="hint">${emptyText}</p>`;
+}
+
+async function showLibrary() {
+  document.getElementById('videoListTitle').textContent = 'Your library';
+  renderVideoList(await window.api.video.library(), 'No videos yet — search the network or upload one.');
+}
+
+async function searchVideos() {
+  const q = document.getElementById('videoSearchInput').value.trim();
+  if (!q) return showLibrary();
+  document.getElementById('videoListTitle').textContent = `Searching “${q}” on the network…`;
+  try {
+    const r = await window.api.video.search(q);
+    document.getElementById('videoListTitle').textContent = `Results for “${q}”`;
+    renderVideoList(r, 'Nothing found. Seeders may be offline.');
+  } catch (e) {
+    document.getElementById('videoListTitle').textContent = 'Search failed: ' + e.message;
+  }
+}
+
+async function playVideo(id) {
+  const v = videoItems.find((x) => x.id === id);
+  playingId = id;
+  document.getElementById('videoPlayer').style.display = 'block';
+  document.getElementById('videoTitle').textContent = v?.title || '';
+  document.getElementById('videoProgress').textContent = v?.local ? '✓ Seeding' : 'Starting stream…';
+  const url = await window.api.video.watch(id);
+  const el = document.getElementById('videoEl');
+  el.src = url;
+  el.play().catch(() => {});
+}
+
+async function uploadVideo() {
+  const btn = document.getElementById('videoUploadBtn');
+  const title = document.getElementById('videoTitleInput').value.trim();
+  const tags = document.getElementById('videoTagsInput').value.split(',').map((t) => t.trim()).filter(Boolean);
+  btn.disabled = true; btn.textContent = 'Uploading…';
+  try {
+    const v = await window.api.video.upload({ title, tags });
+    if (v) {
+      document.getElementById('videoTitleInput').value = '';
+      document.getElementById('videoTagsInput').value = '';
+      await refreshVideoStats();
+      await showLibrary();
+    }
+  } catch (e) {
+    alert('Upload failed: ' + e.message);
+  }
+  btn.disabled = false; btn.textContent = 'Choose file & upload';
 }
