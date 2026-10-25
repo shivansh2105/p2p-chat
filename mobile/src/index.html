@@ -2,390 +2,186 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <meta name="theme-color" content="#1b1938">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="theme-color" content="#FFFFFF">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="description" content="P2P Chat - Decentralized, encrypted, serverless messaging">
   <title>P2P Chat</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <div id="app">
-    <!-- Header -->
     <header class="header">
       <h1>P2P Chat</h1>
-      <div class="connection-status" id="connectionStatus">
+      <div class="connection-status">
         <span class="status-dot" id="statusDot"></span>
         <span id="peerCount">Offline</span>
       </div>
     </header>
 
-    <!-- Main Content -->
     <main class="main-content">
-      <!-- Setup Screen -->
+      <!-- Setup -->
       <div id="setupScreen" class="screen active">
         <div class="setup-card">
-          <h2>Private.<br>Encrypted.<br>Serverless.</h2>
-          <p>Direct peer-to-peer messaging with no servers in between.</p>
-          
+          <h2>P2P Chat</h2>
+          <p>Encrypted messaging without servers. Your messages go directly to your friends.</p>
           <div class="input-group">
-            <label for="usernameInput">Your name</label>
-            <input type="text" id="usernameInput" placeholder="Enter your name" maxlength="50" autocomplete="name">
+            <label>Your Name</label>
+            <input type="text" id="usernameInput" placeholder="Enter name" maxlength="50">
           </div>
-          
-          <button class="btn primary" id="startBtn">Get Started</button>
+          <button class="btn primary" id="startBtn">Continue</button>
         </div>
       </div>
 
-      <!-- Connection Screen -->
+      <!-- Connect -->
       <div id="connectionScreen" class="screen">
         <div class="tabs">
           <button class="tab active" data-tab="create">Invite</button>
           <button class="tab" data-tab="join">Join</button>
         </div>
 
-        <!-- Create Tab -->
         <div class="tab-content active" id="createTab">
-          <p>Generate an invite code and share it with your friend to connect directly.</p>
-          
+          <p>Share this code with your friend:</p>
           <div class="code-display" id="offerCode">
-            <button class="btn accent" id="generateCodeBtn">Generate Invite Code</button>
+            <button class="btn primary" id="generateCodeBtn">Generate Code</button>
           </div>
-          
-          <div id="waitingForAnswer" style="display:none;">
-            <p>✨ Great! Now paste your friend's response code below:</p>
+          <div id="waitingForAnswer" style="display:none">
+            <p>Paste your friend's response:</p>
             <div class="input-group">
-              <label>Response code</label>
-              <textarea id="answerInput" rows="3" placeholder="Paste response code here..."></textarea>
+              <textarea id="answerInput" rows="3" placeholder="Response code..."></textarea>
             </div>
             <button class="btn primary" id="completeConnectionBtn">Connect</button>
           </div>
         </div>
 
-        <!-- Join Tab -->
         <div class="tab-content" id="joinTab">
-          <p>Paste the invite code your friend shared with you.</p>
-          
+          <p>Paste the code from your friend:</p>
           <div class="input-group">
-            <label>Invite code</label>
-            <textarea id="offerInput" rows="3" placeholder="Paste invite code here..."></textarea>
+            <textarea id="offerInput" rows="3" placeholder="Invite code..."></textarea>
           </div>
-          <button class="btn accent" id="acceptOfferBtn">Accept Invite</button>
-          
-          <div id="myAnswerCode" style="display:none;">
-            <p>✨ Send this response code back to your friend:</p>
+          <button class="btn primary" id="acceptOfferBtn">Accept</button>
+          <div id="myAnswerCode" style="display:none">
+            <p>Send this back to your friend:</p>
             <div class="code-display" id="answerCode"></div>
-            <button class="btn secondary" id="copyAnswerBtn">Copy to Clipboard</button>
+            <button class="btn secondary" id="copyAnswerBtn">Copy</button>
           </div>
         </div>
 
-        <!-- Connected Peers -->
-        <div class="connected-peers" id="connectedPeers" style="display:none;">
-          <h3>Connected</h3>
+        <div class="connected-peers" id="connectedPeers" style="display:none">
+          <h3>Online</h3>
           <ul id="peerList"></ul>
         </div>
-
-        <button class="btn primary" id="goToChatBtn" style="display:none;">Start Chatting →</button>
+        <button class="btn primary" id="goToChatBtn" style="display:none">Open Chat</button>
       </div>
 
-      <!-- Chat Screen -->
+      <!-- Chat -->
       <div id="chatScreen" class="screen">
         <div class="messages" id="messages">
           <div class="empty-state" id="emptyChat">
             <div class="empty-state-icon">💬</div>
-            <h3>No messages yet</h3>
-            <p>Send a message to start the conversation. Everything is end-to-end encrypted.</p>
+            <h3>No messages</h3>
+            <p>Send a message to start chatting</p>
           </div>
         </div>
-        
         <div class="message-input">
-          <input type="text" id="messageInput" placeholder="Type a message..." autocomplete="off">
+          <input type="text" id="messageInput" placeholder="Message">
           <button class="btn send-btn" id="sendBtn">↑</button>
         </div>
       </div>
     </main>
 
-    <!-- Bottom Navigation -->
-    <nav class="bottom-nav" id="bottomNav" style="display:none;">
+    <nav class="bottom-nav" id="bottomNav" style="display:none">
       <button class="nav-item" data-screen="connectionScreen">
-        <span class="nav-icon">🔗</span>
-        <span>Connect</span>
+        <span class="nav-icon">🔗</span><span>Connect</span>
       </button>
       <button class="nav-item active" data-screen="chatScreen">
-        <span class="nav-icon">💬</span>
-        <span>Chat</span>
+        <span class="nav-icon">💬</span><span>Chat</span>
       </button>
     </nav>
   </div>
 
   <script type="module">
-    import p2pChat from './app.js';
+    import p2p from './app.js';
+    const $=s=>document.querySelector(s),$$=s=>document.querySelectorAll(s);
 
-    // DOM Elements
-    const $ = (sel) => document.querySelector(sel);
-    const $$ = (sel) => document.querySelectorAll(sel);
+    (async()=>{
+      await p2p.init();
+      p2p.onMessage=m=>{hideEmpty();addMsg(m)};
+      p2p.onPeerConnected=(id,name)=>{updatePeers();toast(`${name} joined`)};
+      p2p.onPeerDisconnected=()=>updatePeers();
+      if(p2p.messages.length){hideEmpty();p2p.messages.forEach(m=>addMsg(m,0))}
+      if(p2p.username!=='Anonymous')$('#usernameInput').value=p2p.username;
 
-    // State
-    let currentScreen = 'setupScreen';
-
-    // Initialize
-    async function init() {
-      await p2pChat.init();
-      
-      // Event handlers
-      p2pChat.onMessage = (msg) => {
-        hideEmptyState();
-        addMessageToUI(msg);
+      $('#startBtn').onclick=async()=>{
+        const n=$('#usernameInput').value.trim();
+        if(!n)return;
+        await p2p.setUsername(n);
+        show('connectionScreen');
+        $('#bottomNav').style.display='flex';
       };
 
-      p2pChat.onPeerConnected = (peerId, username) => {
-        updatePeerList();
-        showToast(`${username} connected!`);
-      };
+      $('#usernameInput').onkeypress=e=>e.key==='Enter'&&$('#startBtn').click();
 
-      p2pChat.onPeerDisconnected = (peerId) => {
-        updatePeerList();
-      };
-
-      // Load existing messages
-      if (p2pChat.messages.length > 0) {
-        hideEmptyState();
-        p2pChat.messages.forEach(msg => addMessageToUI(msg, false));
-      }
-
-      // Restore username
-      if (p2pChat.username && p2pChat.username !== 'Anonymous') {
-        $('#usernameInput').value = p2pChat.username;
-      }
-
-      setupEventListeners();
-    }
-
-    function setupEventListeners() {
-      // Start button
-      $('#startBtn').onclick = async () => {
-        const username = $('#usernameInput').value.trim();
-        if (!username) {
-          $('#usernameInput').focus();
-          $('#usernameInput').style.borderColor = '#ef4444';
-          return;
-        }
-        await p2pChat.setUsername(username);
-        showScreen('connectionScreen');
-        $('#bottomNav').style.display = 'flex';
-      };
-
-      // Username input - remove error state
-      $('#usernameInput').oninput = () => {
-        $('#usernameInput').style.borderColor = '';
-      };
-
-      // Enter key on username
-      $('#usernameInput').onkeypress = (e) => {
-        if (e.key === 'Enter') $('#startBtn').click();
-      };
-
-      // Tabs
-      $$('.tab').forEach(tab => {
-        tab.onclick = () => {
-          $$('.tab').forEach(t => t.classList.remove('active'));
-          $$('.tab-content').forEach(c => c.classList.remove('active'));
-          tab.classList.add('active');
-          $(`#${tab.dataset.tab}Tab`).classList.add('active');
-        };
+      $$('.tab').forEach(t=>t.onclick=()=>{
+        $$('.tab').forEach(x=>x.classList.remove('active'));
+        $$('.tab-content').forEach(x=>x.classList.remove('active'));
+        t.classList.add('active');
+        $(`#${t.dataset.tab}Tab`).classList.add('active');
       });
 
-      // Generate invite code
-      $('#generateCodeBtn').onclick = async () => {
-        const btn = $('#generateCodeBtn');
-        btn.textContent = 'Generating...';
-        btn.disabled = true;
-        
-        try {
-          const code = await p2pChat.createConnectionOffer();
-          $('#offerCode').innerHTML = `
-            <textarea readonly rows="4">${code}</textarea>
-            <button class="btn secondary" id="copyOfferBtn">Copy to Clipboard</button>
-          `;
-          $('#copyOfferBtn').onclick = () => {
-            navigator.clipboard.writeText(code);
-            showToast('Copied!');
-          };
-          $('#waitingForAnswer').style.display = 'block';
-        } catch (e) {
-          showToast('Failed to generate code');
-          btn.textContent = 'Generate Invite Code';
-          btn.disabled = false;
-        }
+      $('#generateCodeBtn').onclick=async()=>{
+        const btn=$('#generateCodeBtn');btn.textContent='...';btn.disabled=1;
+        const code=await p2p.createConnectionOffer();
+        $('#offerCode').innerHTML=`<textarea readonly>${code}</textarea><button class="btn secondary" onclick="navigator.clipboard.writeText('${code}');toast('Copied')">Copy</button>`;
+        $('#waitingForAnswer').style.display='block';
       };
 
-      // Complete connection
-      $('#completeConnectionBtn').onclick = async () => {
-        const answer = $('#answerInput').value.trim();
-        if (!answer) {
-          $('#answerInput').focus();
-          return;
-        }
-        try {
-          await p2pChat.completeConnection(answer);
-          showToast('Connected!');
-          updatePeerList();
-          $('#goToChatBtn').style.display = 'block';
-        } catch (e) {
-          showToast('Invalid code');
-        }
+      $('#completeConnectionBtn').onclick=async()=>{
+        const a=$('#answerInput').value.trim();if(!a)return;
+        try{await p2p.completeConnection(a);toast('Connected!');updatePeers();$('#goToChatBtn').style.display='block'}
+        catch{toast('Invalid code')}
       };
 
-      // Accept offer
-      $('#acceptOfferBtn').onclick = async () => {
-        const offer = $('#offerInput').value.trim();
-        if (!offer) {
-          $('#offerInput').focus();
-          return;
-        }
-        
-        const btn = $('#acceptOfferBtn');
-        btn.textContent = 'Processing...';
-        btn.disabled = true;
-        
-        try {
-          const answerCode = await p2pChat.acceptConnectionOffer(offer);
-          $('#answerCode').innerHTML = `<textarea readonly rows="4">${answerCode}</textarea>`;
-          $('#myAnswerCode').style.display = 'block';
-          $('#copyAnswerBtn').onclick = () => {
-            navigator.clipboard.writeText(answerCode);
-            showToast('Copied!');
-          };
-          updatePeerList();
-          $('#goToChatBtn').style.display = 'block';
-        } catch (e) {
-          showToast('Invalid invite code');
-        } finally {
-          btn.textContent = 'Accept Invite';
-          btn.disabled = false;
-        }
+      $('#acceptOfferBtn').onclick=async()=>{
+        const o=$('#offerInput').value.trim();if(!o)return;
+        try{
+          const ans=await p2p.acceptConnectionOffer(o);
+          $('#answerCode').innerHTML=`<textarea readonly>${ans}</textarea>`;
+          $('#myAnswerCode').style.display='block';
+          $('#copyAnswerBtn').onclick=()=>{navigator.clipboard.writeText(ans);toast('Copied')};
+          updatePeers();$('#goToChatBtn').style.display='block';
+        }catch{toast('Invalid code')}
       };
 
-      // Go to chat
-      $('#goToChatBtn').onclick = () => {
-        showScreen('chatScreen');
-        $$('.nav-item').forEach(i => i.classList.remove('active'));
-        $('[data-screen="chatScreen"]').classList.add('active');
-      };
+      $('#goToChatBtn').onclick=()=>{show('chatScreen');$$('.nav-item').forEach(i=>i.classList.remove('active'));$('[data-screen="chatScreen"]').classList.add('active')};
+      $('#sendBtn').onclick=send;
+      $('#messageInput').onkeypress=e=>e.key==='Enter'&&send();
+      $$('.nav-item').forEach(i=>i.onclick=()=>{$$('.nav-item').forEach(x=>x.classList.remove('active'));i.classList.add('active');show(i.dataset.screen)});
 
-      // Send message
-      $('#sendBtn').onclick = sendMessage;
-      $('#messageInput').onkeypress = (e) => {
-        if (e.key === 'Enter') sendMessage();
-      };
-
-      // Bottom nav
-      $$('.nav-item').forEach(item => {
-        item.onclick = () => {
-          $$('.nav-item').forEach(i => i.classList.remove('active'));
-          item.classList.add('active');
-          showScreen(item.dataset.screen);
-        };
-      });
-    }
-
-    async function sendMessage() {
-      const input = $('#messageInput');
-      const content = input.value.trim();
-      if (!content) return;
-
-      const peers = p2pChat.getConnectedPeers();
-      if (peers.length === 0) {
-        showToast('No peers connected');
-        return;
+      async function send(){
+        const v=$('#messageInput').value.trim();if(!v||!p2p.getConnectedPeers().length)return;
+        hideEmpty();const m=await p2p.sendMessage(v);addMsg(m);$('#messageInput').value='';
       }
 
-      try {
-        hideEmptyState();
-        const msg = await p2pChat.sendMessage(content);
-        addMessageToUI(msg);
-        input.value = '';
-      } catch (e) {
-        showToast('Failed to send');
+      function addMsg(m,scroll=1){
+        const c=$('#messages'),own=m.from===p2p.peerId;
+        const d=document.createElement('div');d.className=`message ${own?'own':'other'}`;
+        d.innerHTML=`<div class="message-header"><span class="username">${esc(m.fromUsername||'?')}</span><span class="time">${new Date(m.timestamp).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span></div><div class="message-content">${esc(m.content)}</div>`;
+        c.appendChild(d);if(scroll)c.scrollTop=c.scrollHeight;
       }
-    }
 
-    function addMessageToUI(msg, scroll = true) {
-      const container = $('#messages');
-      const isOwn = msg.from === p2pChat.peerId;
-      
-      const div = document.createElement('div');
-      div.className = `message ${isOwn ? 'own' : 'other'}`;
-      div.innerHTML = `
-        <div class="message-header">
-          <span class="username">${escapeHtml(msg.fromUsername || 'Unknown')}</span>
-          <span class="time">${formatTime(msg.timestamp)}</span>
-        </div>
-        <div class="message-content">${escapeHtml(msg.content)}</div>
-      `;
-      container.appendChild(div);
-      
-      if (scroll) {
-        container.scrollTop = container.scrollHeight;
+      function hideEmpty(){const e=$('#emptyChat');if(e)e.remove()}
+      function updatePeers(){
+        const ps=p2p.getConnectedPeers(),n=ps.length;
+        $('#peerCount').textContent=n?`${n} online`:'Offline';
+        $('#statusDot').className=`status-dot ${n?'online':''}`;
+        $('#peerList').innerHTML=ps.map(p=>`<li>${esc(p.username)}</li>`).join('');
+        $('#connectedPeers').style.display=n?'block':'none';
       }
-    }
+      function show(id){$$('.screen').forEach(s=>s.classList.remove('active'));$(`#${id}`).classList.add('active')}
+      function esc(t){const d=document.createElement('div');d.textContent=t;return d.innerHTML}
+    })();
 
-    function hideEmptyState() {
-      const empty = $('#emptyChat');
-      if (empty) empty.remove();
-    }
-
-    function updatePeerList() {
-      const peers = p2pChat.getConnectedPeers();
-      const count = peers.length;
-      
-      // Update header status
-      $('#peerCount').textContent = count > 0 ? `${count} peer${count > 1 ? 's' : ''}` : 'Offline';
-      $('#statusDot').className = `status-dot ${count > 0 ? 'online' : ''}`;
-      
-      // Update peer list
-      const list = $('#peerList');
-      list.innerHTML = peers.map(p => `<li>${escapeHtml(p.username)}</li>`).join('');
-      
-      $('#connectedPeers').style.display = count > 0 ? 'block' : 'none';
-    }
-
-    function showScreen(screenId) {
-      $$('.screen').forEach(s => s.classList.remove('active'));
-      $(`#${screenId}`).classList.add('active');
-      currentScreen = screenId;
-    }
-
-    function showToast(text) {
-      // Remove existing toasts
-      $$('.toast').forEach(t => t.remove());
-      
-      const toast = document.createElement('div');
-      toast.className = 'toast';
-      toast.textContent = text;
-      document.body.appendChild(toast);
-      setTimeout(() => toast.remove(), 3000);
-    }
-
-    function escapeHtml(text) {
-      const div = document.createElement('div');
-      div.textContent = text;
-      return div.innerHTML;
-    }
-
-    function formatTime(timestamp) {
-      return new Date(timestamp).toLocaleTimeString([], { 
-        hour: '2-digit', 
-        minute: '2-digit' 
-      });
-    }
-
-    // Start app
-    init();
+    window.toast=t=>{$$('.toast').forEach(x=>x.remove());const d=document.createElement('div');d.className='toast';d.textContent=t;document.body.appendChild(d);setTimeout(()=>d.remove(),3000)};
   </script>
 </body>
 </html>
