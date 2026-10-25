@@ -1,322 +1,105 @@
-# P2P Chat - Decentralized Messenger
+# P2P Chat
 
-A Telegram-like chat application that works **completely serverless** using peer-to-peer networking, similar to how BitTorrent and Bitcoin work.
+Chat and video sharing with **no central server**, built like BitTorrent: every PC that runs the app helps carry the network.
 
-## 🔥 New: Username Registry & End-to-End Encryption
+## What it can do
 
-**Connect by username, not addresses!** Like @handles but decentralized:
+| | Feature | How |
+|---|---|---|
+| 💬 | **Encrypted chat** | Direct peer-to-peer. Ed25519 identity, X25519 per-chat keys, AES-256-GCM |
+| 📭 | **Offline messages** | Friend offline? The message is sealed to their key and stored on up to 5 other PCs. They get it when they're back, even if you're offline by then. The PCs holding it can't read it |
+| 🎬 | **Video sharing** | Upload → split into 256 KB chunks → copied to 3 PCs. It stays watchable after the uploader goes offline |
+| 🔍 | **Network-wide search** | Find videos by title or tag across the whole network, not just your contacts |
+| 🌱 | **Every viewer seeds** | Watching a video makes you a seeder. Downloads pull chunks from many seeders in parallel |
+| 🧹 | **Smart cleanup** | Your copy is deleted only if your disk is >90% of quota and ≥10 other PCs are confirmed live seeders, or ≥25 are and you haven't watched it in 7 days |
+| 🔗 | **Works behind NAT** | Direct → relay via another PC → hole punching to go direct. Falls back to public IPFS relays when no app user can relay |
+| 🙋 | **Usernames** | Find people by @username via the DHT |
+| ☁️ | **Google Drive backup** | Optional, encrypted |
 
-```
-You: "Hey, add me on P2P Chat! My username is @alice"
-Friend: Searches "alice" → Finds you → Connects directly
-```
+Each PC donates relay + storage (5 GB default). **On by default, opt-out in settings.**
 
-**Tailscale-inspired architecture:**
-- **Ed25519 Identity Keys** — Your permanent cryptographic identity
-- **X25519 Session Keys** — Per-chat encryption (like Signal)
-- **DHT Username Registry** — Globally unique usernames stored in the network
-- **Optional Coordination Server** — Faster lookups (works without it too)
-
-## 🌐 Volunteer Relay Nodes (Like Tor/Bitcoin)
-
-**Help the network!** Your PC can be a relay node to help others connect:
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    VOLUNTEER RELAY NETWORK                       │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│   User A (behind NAT)                                           │
-│       │                                                          │
-│       │ ← Can't connect directly                                │
-│       ▼                                                          │
-│   ┌──────────────────┐                                          │
-│   │  VOLUNTEER RELAY  │ ← Your PC (helping the network!)        │
-│   │  (Your PC!)       │                                          │
-│   └──────────────────┘                                          │
-│       │                                                          │
-│       │ → Forwards encrypted packets                            │
-│       ▼                                                          │
-│   User B (also behind NAT)                                      │
-│                                                                  │
-│   Privacy: All traffic END-TO-END ENCRYPTED                     │
-│   Relay cannot read messages - only forward packets             │
-│   Same model as Tor/Tailscale DERP                              │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-**Why run a relay?**
-- 🌍 **Strengthen the network** — More relays = better connectivity
-- 🤝 **Help friends** — Especially those behind strict firewalls/NAT
-- ⚡ **Priority routing** — Relay nodes get faster connections
-- 📊 **Track your impact** — See how many peers you've helped
-
-**Enabled by default** (like BitTorrent seeding). Turn off in Settings → Relay if needed.
-
-## 🌐 How It Works (No Servers Required!)
+## How it works
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    P2P NETWORK ARCHITECTURE                      │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│   User A ◄─────────────► User B                                 │
-│      │                      │                                    │
-│      │    Direct P2P        │                                    │
-│      │    Connection        │                                    │
-│      ▼                      ▼                                    │
-│   ┌──────────────────────────────────────┐                      │
-│   │         KADEMLIA DHT                  │                      │
-│   │   (Distributed Hash Table)            │                      │
-│   │   Same as BitTorrent peer discovery   │                      │
-│   └──────────────────────────────────────┘                      │
-│      │                      │                                    │
-│      ▼                      ▼                                    │
-│   User C ◄──────────────► User D                                │
-│                                                                  │
-│   Messages spread via GOSSIP (like Bitcoin transactions)        │
-│   NAT traversal via FREE STUN servers (Google, Cloudflare)      │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+Upload ─► your PC + 3 copies ─► you go offline ─► others still find & download it
+                                                  └─► each viewer becomes a seeder
 ```
 
-### Key Technologies
+- **No tracker server.** The Kademlia DHT is the tracker. PCs publish provider records:
+  - `video:<id>`: I seed this video
+  - `kw:<word>`: I have a video with this word in its title or tags
+  - `inbox:<you>`: I'm holding mail for you
+- **Your keys are your account.** No email or phone number. Keys are stored encrypted on your device (OS keychain), and your Peer ID stays the same across restarts.
+- **Integrity.** Every chunk and every full video is checked against its SHA-256 hash. Fake or corrupted data is rejected.
+- **Safe cleanup.** Before deleting its copy, a PC connects to the other seeders and checks they really hold the whole video. Stale DHT records don't count.
 
-| Component | Technology | Similar To |
-|-----------|-----------|------------|
-| Peer Discovery | Kademlia DHT | BitTorrent DHT |
-| Message Propagation | GossipSub | Bitcoin Gossip |
-| NAT Traversal | WebRTC + STUN | WebRTC calls |
-| Local Discovery | mDNS | AirDrop |
-| Encryption | Noise Protocol | Signal Protocol |
+| Layer | Technology |
+|---|---|
+| Networking | libp2p (TCP, WebSockets, circuit-relay v2, DCUtR hole punching, AutoNAT) |
+| Discovery | Kademlia DHT, mDNS (same WiFi), public libp2p bootstrap nodes |
+| Transport encryption | Noise |
+| Message encryption | X25519 + HKDF + AES-256-GCM, Ed25519 signatures |
+| Storage | electron-store (JSON) + chunk files on disk |
 
-## ✨ Features
+## Download
 
-- **🔒 Fully Decentralized** - No central servers, peers connect directly
-- **💾 Local Storage** - All chats stored on your device
-- **☁️ Google Drive Backup** - WhatsApp-style encrypted cloud backup
-- **🔍 Auto-Discovery** - Find friends on same WiFi automatically
-- **📱 Telegram-style UI** - Beautiful, familiar interface
-- **🔐 End-to-End Encryption** - Messages encrypted in transit
-- **🌍 Works Over Internet** - Connect to anyone, anywhere
-- **📲 Cross-Platform** - Windows, Mac, Linux, Android, iOS
+- **Windows / macOS / Linux / Android:** go to [Actions](https://github.com/shivansh2105/p2p-chat/actions), open the latest green run, and download from **Artifacts**.
+- **Releases:** pushing a `v*` tag publishes a [GitHub Release](https://github.com/shivansh2105/p2p-chat/releases).
 
-## 📥 Download
+See [INSTALL.md](INSTALL.md) for install steps.
 
-| Platform | Download |
-|----------|----------|
-| Windows | [Download .exe](https://github.com/shivansh2105/p2p-chat/releases/latest) |
-| macOS | [Download .dmg](https://github.com/shivansh2105/p2p-chat/releases/latest) |
-| Linux | [Download .AppImage](https://github.com/shivansh2105/p2p-chat/releases/latest) |
-| Android | [Download .apk](https://github.com/shivansh2105/p2p-chat/actions) (from Actions artifacts) |
-
-Or build from source (see below).
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Node.js 18+ 
-- npm or yarn
-
-### Installation
+## Develop
 
 ```bash
-# Clone or navigate to the project
-cd p2p-chat
-
-# Install dependencies
 npm install
-
-# Rebuild native modules for Electron
-npm run rebuild
-
-# Start the app
-npm start
+npm start               # run the desktop app
+npm test                # 42 end-to-end network tests: chat, offline mail,
+                        # video swarm, relay-only links, safe eviction
+npm run probe:internet  # check public relays / hole punching from your network
 ```
 
-### Development
+Tests run on Node 20.18 (the Node version inside Electron 33).
+
+### Project structure
+
+```
+src/main/
+  main.js            Electron main process + IPC
+  p2p-node.js        libp2p node: transports, relay, DHT, chat
+  esm.js             loads ESM-only libp2p modules into Electron's CommonJS
+  crypto.js          identity, session + sealed-box encryption
+  inbox.js           offline messages (store-and-forward)
+  discovery.js       DHT provider records ("trackerless tracker")
+  video-store.js     chunking, local storage, hash checks, eviction
+  video-protocol.js  search, swarm download, replication
+  relay-server.js    volunteer relay stats/limits
+  username-registry.js, database.js, google-drive.js
+mobile/              Android app (Capacitor + WebRTC)
+test/                end-to-end tests + internet probes
+```
+
+### Google Drive backup
+
+1. Create a project in [Google Cloud Console](https://console.cloud.google.com/) and enable the Drive API.
+2. Create OAuth 2.0 credentials, then set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
+
+### Android build
 
 ```bash
-npm run dev  # Opens with DevTools
-```
-
-## 🤝 Connecting with Friends
-
-### Method 1: Share Address (Internet)
-1. Click the **menu** (☰) → **Settings** → copy your **Peer Address**
-2. Send it to your friend (via any channel)
-3. They paste it in **New Chat** → **Connect**
-
-### Method 2: Same WiFi (Auto-Discovery)
-1. Both users on same network
-2. Peers appear automatically in **New Chat** → **Nearby Peers**
-
-### Method 3: QR Code
-1. Go to **New Chat** → **Share** tab
-2. Friend scans QR code
-
-## 📁 Project Structure
-
-```
-p2p-chat/
-├── src/
-│   ├── main/
-│   │   ├── main.js           # Electron main process
-│   │   ├── preload.js        # Context bridge
-│   │   ├── p2p-node.js       # libp2p networking (DHT + Gossip)
-│   │   ├── database.js       # SQLite local storage
-│   │   └── google-drive.js   # Backup functionality
-│   └── renderer/
-│       ├── index.html        # Main UI
-│       ├── styles.css        # Telegram-style CSS
-│       └── app.js            # Frontend logic
-├── package.json
-└── README.md
-```
-
-## 🔧 Configuration
-
-### Google Drive Backup
-
-1. Create a project at [Google Cloud Console](https://console.cloud.google.com/)
-2. Enable Google Drive API
-3. Create OAuth 2.0 credentials
-4. Set environment variables:
-   ```bash
-   GOOGLE_CLIENT_ID=your_client_id
-   GOOGLE_CLIENT_SECRET=your_client_secret
-   ```
-
-### Running Your Own Bootstrap Nodes
-
-For a larger network, you can run relay nodes:
-
-```javascript
-// In p2p-node.js, add to BOOTSTRAP_NODES:
-const BOOTSTRAP_NODES = [
-  '/ip4/YOUR_SERVER_IP/tcp/4001/p2p/YOUR_PEER_ID'
-];
-```
-
-## 🛡️ Security Audit
-
-This application has been security-audited with the following protections:
-
-| Feature | Protection |
-|---------|------------|
-| **Private Key Storage** | Encrypted at rest using OS keychain (Windows DPAPI / macOS Keychain) |
-| **Perfect Forward Secrecy** | Key ratcheting ensures past messages stay secure if keys leak |
-| **Replay Protection** | Message sequence numbers prevent replay attacks |
-| **Rate Limiting** | Protects against DoS attacks on all endpoints |
-| **SSRF Prevention** | Coordination server URLs are validated against blocklists |
-| **Relay Authentication** | Signed identity required for relay operations |
-| **Metadata Anonymization** | Daily-rotating hashes for relay statistics |
-| **Request Size Limits** | 64KB max to prevent memory exhaustion |
-
-## 🔐 Security
-
-- **Transport Encryption**: Noise protocol (same as Signal)
-- **Message Privacy**: Messages only readable by sender/recipient
-- **No Metadata Leakage**: No central server logs your activity
-- **Backup Encryption**: AES-256-GCM with user-derived keys
-
-### Encryption Architecture (Tailscale-inspired)
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    SECURITY ARCHITECTURE                         │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  IDENTITY LAYER (Ed25519)                                       │
-│  ├── Each user has a permanent keypair                          │
-│  ├── Public key = Your identity (like Tailscale node key)       │
-│  ├── Private key NEVER leaves device                            │
-│  └── Used to sign username registrations                        │
-│                                                                  │
-│  SESSION LAYER (X25519 ECDH)                                    │
-│  ├── Ephemeral keys generated per chat                          │
-│  ├── Diffie-Hellman key exchange                                │
-│  └── Perfect forward secrecy                                    │
-│                                                                  │
-│  MESSAGE LAYER (AES-256-GCM)                                    │
-│  ├── Symmetric encryption for speed                             │
-│  ├── Keys derived via HKDF from session secret                  │
-│  └── Each message has unique IV                                 │
-│                                                                  │
-│  TRANSPORT LAYER (Noise Protocol)                               │
-│  └── All P2P connections encrypted                              │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Username Registry (DHT-based)
-
-Usernames are stored in the distributed hash table:
-
-| Key | Value |
-|-----|-------|
-| `/p2pchat/username/alice` | `{ publicKey, peerId, addresses, signature }` |
-
-- **Globally unique** — First come, first served
-- **Self-sovereign** — You own your username (signed by your key)
-- **Decentralized** — No central authority controls usernames
-- **Renewable** — Re-announce every 24 hours to keep active
-
-## 📊 Network Properties
-
-| Property | Value |
-|----------|-------|
-| Min Connections | 3 peers |
-| Max Connections | 50 peers |
-| DHT Routing | ~3 hops for 1000+ nodes |
-| Message Delivery | Multi-path redundancy |
-| Offline Sync | Automatic on reconnect |
-
-## 🛠️ Technologies Used
-
-- **Electron** - Cross-platform desktop app
-- **libp2p** - Modular P2P networking
-- **better-sqlite3** - Fast local database
-- **Google APIs** - Drive backup
-- **WebRTC** - NAT traversal
-
-## 📱 Mobile App
-
-### Android Build
-
-```bash
-cd mobile
-npm install
-npm run build
-npx cap add android
-npx cap sync android
-npx cap open android  # Opens in Android Studio
-```
-
-Then build APK from Android Studio, or run:
-```bash
+cd mobile && npm install && npm run build
+npx cap add android && npx cap sync android
 cd android && ./gradlew assembleDebug
 ```
 
-### iOS Build (requires macOS)
+## Limitations (honest)
 
-```bash
-cd mobile
-npm install
-npm run build
-npx cap add ios
-npx cap sync ios
-npx cap open ios  # Opens in Xcode
-```
+- **The desktop UI has no video screens yet.** Video features work in the networking layer (`uploadVideo`, `searchVideos`, `downloadVideo`) and are covered by tests, but there are no buttons for them yet.
+- **Mobile is a separate network.** The Android app uses WebRTC with invite codes and TURN servers (metered.ca). It can't yet see desktop peers or their videos.
+- **No video compression.** Videos are stored at their original size.
+- **Strict NAT on both sides** (common on mobile data): video then needs an app user's PC with an open port to relay. Public relays only carry small amounts of data (~128 KB / 2 min).
+- **DHT metadata is public.** Anyone can see who seeds a video and that someone holds mail for a given Peer ID. Message contents stay private.
+- **Uploader names on videos aren't signed yet.** Video content is still verified by hash.
 
-## 📜 License
+## License
 
-MIT
-
-## 🙏 Acknowledgments
-
-- [libp2p](https://libp2p.io/) - The networking stack
-- [Protocol Labs](https://protocol.ai/) - IPFS/libp2p creators
-- [Telegram](https://telegram.org/) - UI inspiration
+MIT. Built on [libp2p](https://libp2p.io/) by Protocol Labs. UI inspired by Telegram.
