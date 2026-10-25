@@ -186,7 +186,14 @@ class VideoStore extends EventEmitter {
    * Add video metadata from network (for discovery)
    */
   addVideoFromNetwork(video) {
-    if (!this.videos.has(video.id)) {
+    const existing = this.videos.get(video.id);
+    if (existing && (!existing.contentHash || !Array.isArray(existing.chunkHashes)) && video.contentHash) {
+      // Upgrade an incomplete record (e.g. from an older/partial announcement)
+      Object.assign(existing, { chunkHashes: video.chunkHashes, contentHash: video.contentHash, chunkSize: video.chunkSize || existing.chunkSize });
+      this.saveIndex();
+      return;
+    }
+    if (!existing) {
       this.videos.set(video.id, {
         ...video,
         isLocal: false,
@@ -252,6 +259,24 @@ class VideoStore extends EventEmitter {
     const buffer = this.assembleVideo(videoId);
     fs.writeFileSync(outputPath, buffer);
     return outputPath;
+  }
+
+  /** Bytes of chunk data on disk */
+  getUsedBytes() {
+    let total = 0;
+    for (const p of this.chunks.values()) {
+      try { total += fs.statSync(p).size; } catch {}
+    }
+    return total;
+  }
+
+  /** Whole-file check: sha256(all chunks) must equal the advertised contentHash */
+  verifyComplete(videoId) {
+    const video = this.videos.get(videoId);
+    if (!video || this.getMissingChunks(videoId).length) return false;
+    const h = crypto.createHash('sha256');
+    for (const hash of video.chunkHashes) h.update(this.getChunk(hash));
+    return h.digest('hex') === video.contentHash;
   }
 
   /**

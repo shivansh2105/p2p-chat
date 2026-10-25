@@ -70,6 +70,8 @@ class P2PCrypto {
         await this.saveIdentitySecure();
         console.log('[Crypto] Generated new identity key');
       }
+
+      await this.initializeBoxKey();
       
       return this.getPublicKeyFingerprint();
     } catch (error) {
@@ -98,7 +100,7 @@ class P2PCrypto {
   encryptKeyFile(data) {
     const machineId = this.getMachineEntropy();
     const salt = crypto.randomBytes(32);
-    const key = crypto.scryptSync(machineId, salt, 32, { N: 2 ** 17, r: 8, p: 1 });
+    const key = crypto.scryptSync(machineId, salt, 32, { N: 2 ** 17, r: 8, p: 1, maxmem: 256 * 1024 * 1024 });
     const iv = crypto.randomBytes(12);
     
     const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
@@ -119,7 +121,7 @@ class P2PCrypto {
     const encrypted = data.slice(61);
     
     const machineId = this.getMachineEntropy();
-    const key = crypto.scryptSync(machineId, salt, 32, { N: 2 ** 17, r: 8, p: 1 });
+    const key = crypto.scryptSync(machineId, salt, 32, { N: 2 ** 17, r: 8, p: 1, maxmem: 256 * 1024 * 1024 });
     
     const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
     decipher.setAuthTag(authTag);
@@ -166,10 +168,72 @@ class P2PCrypto {
     });
   }
 
+  // NOTE: crypto.createECDH('x25519') throws "Invalid EC curve name" in Node,
+  // so X25519 must use KeyObjects + crypto.diffieHellman.
+  static x25519PublicFromRaw(raw) {
+    const prefix = Buffer.from('302a300506032b656e032100', 'hex'); // SPKI header for X25519
+    return crypto.createPublicKey({ key: Buffer.concat([prefix, Buffer.from(raw)]), format: 'der', type: 'spki' });
+  }
+
+  static x25519RawPublic(publicKeyObject) {
+    return Buffer.from(publicKeyObject.export({ type: 'spki', format: 'der' }).subarray(-32));
+  }
+
   generateEphemeralKeyPair() {
-    const ecdh = crypto.createECDH('x25519');
-    ecdh.generateKeys();
-    return { publicKey: ecdh.getPublicKey(), privateKey: ecdh.getPrivateKey(), ecdh };
+    let { publicKey, privateKey } = crypto.generateKeyPairSync('x25519');
+    const raw = P2PCrypto.x25519RawPublic(publicKey);
+    return {
+      publicKey: raw,
+      privateKey: null, // kept inside the KeyObject, dropped after use
+      ecdh: {
+        computeSecret: (theirRaw) => {
+          const secret = crypto.diffieHellman({
+            privateKey, publicKey: P2PCrypto.x25519PublicFromRaw(theirRaw)
+          });
+          privateKey = null; // single use
+          return secret;
+        }
+      }
+    };
+  }
+
+  /**
+   * Long-term X25519 "inbox" key. Others encrypt offline messages to it;
+   * relays that store those messages cannot read them.
+   */
+  async initializeBoxKey() {
+    const boxPath = path.join(this.dataDir, 'box.key.enc');
+    if (fs.existsSync(boxPath)) {
+      const raw = fs.readFileSync(boxPath);
+      const data = safeStorage ? JSON.parse(safeStorage.decryptString(raw)) : this.decryptKeyFile(raw);
+      this.boxPrivateKey = crypto.createPrivateKey({ key: Buffer.from(data.privateKey, 'base64'), format: 'der', type: 'pkcs8' });
+    } else {
+      const { privateKey } = crypto.generateKeyPairSync('x25519');
+      this.boxPrivateKey = privateKey;
+      const json = JSON.stringify({ privateKey: privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64') });
+      const enc = safeStorage ? safeStorage.encryptString(json) : this.encryptKeyFile(json);
+      fs.writeFileSync(boxPath, enc, { mode: 0o600 });
+    }
+    this.boxPublicRaw = P2PCrypto.x25519RawPublic(crypto.createPublicKey(this.boxPrivateKey));
+  }
+
+  /** Generic encrypted secret storage (OS keychain via safeStorage, else scrypt+AES-GCM) */
+  loadSecret(name) {
+    const file = path.join(this.dataDir, `${name}.enc`);
+    if (!fs.existsSync(file)) return null;
+    const raw = fs.readFileSync(file);
+    return safeStorage ? JSON.parse(safeStorage.decryptString(raw)) : this.decryptKeyFile(raw);
+  }
+
+  saveSecret(name, obj) {
+    fs.mkdirSync(this.dataDir, { recursive: true });
+    const json = JSON.stringify(obj);
+    const enc = safeStorage ? safeStorage.encryptString(json) : this.encryptKeyFile(json);
+    fs.writeFileSync(path.join(this.dataDir, `${name}.enc`), enc, { mode: 0o600 });
+  }
+
+  getBoxPublicKey() {
+    return this.boxPublicRaw ? this.boxPublicRaw.toString('base64') : null;
   }
 
   getPublicKeyFingerprint() {
@@ -232,7 +296,7 @@ class P2PCrypto {
     const peerIds = [session.ourPeerId, session.theirPeerId].sort();
     const salt = crypto.createHash('sha256').update(peerIds.join(':')).digest();
     
-    session.chainKey = crypto.hkdfSync('sha256', session.sharedSecret, salt, 'p2p-chat-chain-v2', 32);
+    session.chainKey = Buffer.from(crypto.hkdfSync('sha256', session.sharedSecret, salt, 'p2p-chat-chain-v2', 32));
     
     // SECURITY: Clear sensitive ephemeral material after key derivation
     if (session.ourEphemeral.privateKey) session.ourEphemeral.privateKey.fill(0);
@@ -246,8 +310,8 @@ class P2PCrypto {
   }
 
   ratchetChainKey(session) {
-    session.chainKey = crypto.hkdfSync('sha256', session.chainKey, Buffer.from('ratchet'), 'chain-ratchet', 32);
-    return crypto.hkdfSync('sha256', session.chainKey, Buffer.from('message'), 'message-key', 32);
+    session.chainKey = Buffer.from(crypto.hkdfSync('sha256', session.chainKey, Buffer.from('ratchet'), 'chain-ratchet', 32));
+    return Buffer.from(crypto.hkdfSync('sha256', session.chainKey, Buffer.from('message'), 'message-key', 32));
   }
 
   hasSession(peerId) {
@@ -325,7 +389,7 @@ class P2PCrypto {
     }
     
     const salt = crypto.randomBytes(32);
-    const key = crypto.scryptSync(password, salt, 32, { N: 2 ** 17, r: 8, p: 1 });
+    const key = crypto.scryptSync(password, salt, 32, { N: 2 ** 17, r: 8, p: 1, maxmem: 256 * 1024 * 1024 });
     const iv = crypto.randomBytes(12);
     const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
     
@@ -340,7 +404,7 @@ class P2PCrypto {
 
   importSessions(backup, password) {
     const salt = Buffer.from(backup.salt, 'base64');
-    const params = backup.version >= 2 ? { N: 2 ** 17, r: 8, p: 1 } : {};
+    const params = backup.version >= 2 ? { N: 2 ** 17, r: 8, p: 1, maxmem: 256 * 1024 * 1024 } : {};
     const key = crypto.scryptSync(password, salt, 32, params);
     
     const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(backup.iv, 'base64'));
@@ -370,81 +434,35 @@ class P2PCrypto {
   }
 
   /**
-   * Encrypt a message for a specific recipient's public key
-   * Used for storing offline messages on relay nodes
+   * Sealed box: encrypt to a recipient's X25519 inbox key (base64, raw 32 bytes).
+   * Format: ephPub(32) | iv(12) | tag(16) | ciphertext. Relays storing it can't read it.
    */
-  encryptForRecipient(plaintext, recipientPublicKey) {
-    // Generate ephemeral keypair for this message
-    const ephemeral = crypto.createECDH('secp256k1');
-    ephemeral.generateKeys();
-    
-    // Derive shared secret with recipient's public key
-    const sharedSecret = ephemeral.computeSecret(
-      Buffer.from(recipientPublicKey, 'hex')
-    );
-    
-    // Derive encryption key
-    const key = crypto.createHash('sha256').update(sharedSecret).digest();
-    const iv = crypto.randomBytes(16);
-    
-    // Encrypt
+  encryptForRecipient(plaintext, recipientBoxKeyB64) {
+    const recipientRaw = Buffer.from(recipientBoxKeyB64, 'base64');
+    if (recipientRaw.length !== 32) throw new Error('Invalid recipient box key');
+    const eph = crypto.generateKeyPairSync('x25519');
+    const ephRaw = P2PCrypto.x25519RawPublic(eph.publicKey);
+    const shared = crypto.diffieHellman({ privateKey: eph.privateKey, publicKey: P2PCrypto.x25519PublicFromRaw(recipientRaw) });
+    const key = Buffer.from(crypto.hkdfSync('sha256', shared, Buffer.concat([ephRaw, recipientRaw]), 'p2p-chat-sealed-v1', 32));
+    const iv = crypto.randomBytes(12);
     const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-    let encrypted = cipher.update(plaintext, 'utf8');
-    encrypted = Buffer.concat([encrypted, cipher.final()]);
-    const authTag = cipher.getAuthTag();
-    
-    // Clear sensitive data
-    sharedSecret.fill(0);
-    key.fill(0);
-    
-    // Return: ephemeralPubKey + iv + authTag + ciphertext
-    return Buffer.concat([
-      ephemeral.getPublicKey(),
-      iv,
-      authTag,
-      encrypted
-    ]).toString('base64');
+    const ct = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+    shared.fill(0); key.fill(0);
+    return Buffer.concat([ephRaw, iv, cipher.getAuthTag(), ct]).toString('base64');
   }
 
-  /**
-   * Decrypt a message encrypted for us
-   */
-  decryptFromSender(encryptedBase64) {
-    const data = Buffer.from(encryptedBase64, 'base64');
-    
-    // Parse components
-    const ephemeralPubKey = data.subarray(0, 65); // secp256k1 uncompressed
-    const iv = data.subarray(65, 81);
-    const authTag = data.subarray(81, 97);
-    const ciphertext = data.subarray(97);
-    
-    // Derive shared secret using our private key
-    const ecdh = crypto.createECDH('secp256k1');
-    ecdh.setPrivateKey(this.privateKey);
-    const sharedSecret = ecdh.computeSecret(ephemeralPubKey);
-    
-    // Derive decryption key
-    const key = crypto.createHash('sha256').update(sharedSecret).digest();
-    
-    // Decrypt
+  decryptFromSender(encryptedB64) {
+    if (!this.boxPrivateKey) throw new Error('Box key not initialized');
+    const data = Buffer.from(encryptedB64, 'base64');
+    if (data.length < 60) throw new Error('Ciphertext too short');
+    const ephRaw = data.subarray(0, 32), iv = data.subarray(32, 44), tag = data.subarray(44, 60), ct = data.subarray(60);
+    const shared = crypto.diffieHellman({ privateKey: this.boxPrivateKey, publicKey: P2PCrypto.x25519PublicFromRaw(ephRaw) });
+    const key = Buffer.from(crypto.hkdfSync('sha256', shared, Buffer.concat([ephRaw, this.boxPublicRaw]), 'p2p-chat-sealed-v1', 32));
     const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-    decipher.setAuthTag(authTag);
-    let decrypted = decipher.update(ciphertext);
-    decrypted = Buffer.concat([decrypted, decipher.final()]);
-    
-    // Clear sensitive data
-    sharedSecret.fill(0);
-    key.fill(0);
-    
-    return decrypted.toString('utf8');
-  }
-
-  /**
-   * Get our public key for others to encrypt to
-   */
-  getPublicKey() {
-    if (!this.publicKey) return null;
-    return this.publicKey.toString('hex');
+    decipher.setAuthTag(tag);
+    const pt = Buffer.concat([decipher.update(ct), decipher.final()]);
+    shared.fill(0); key.fill(0);
+    return pt.toString('utf8');
   }
 }
 

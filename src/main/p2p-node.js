@@ -35,20 +35,8 @@
  *    → Each new user strengthens the network
  */
 
-const { createLibp2p } = require('libp2p');
-const { tcp } = require('@libp2p/tcp');
-const { webSockets } = require('@libp2p/websockets');
-const { noise } = require('@chainsafe/libp2p-noise');
-const { yamux } = require('@chainsafe/libp2p-yamux');
-const { identify } = require('@libp2p/identify');
-const { kadDHT } = require('@libp2p/kad-dht');
-const { gossipsub } = require('@chainsafe/libp2p-gossipsub');
-const { mdns } = require('@libp2p/mdns');
-const { circuitRelayTransport, circuitRelayServer } = require('@libp2p/circuit-relay-v2');
-const { autoNAT } = require('@libp2p/autonat');
-const { dcutr } = require('@libp2p/dcutr');
-const { bootstrap } = require('@libp2p/bootstrap');
-const { multiaddr } = require('@multiformats/multiaddr');
+const { loadEsm, esm, fromString, toString } = require('./esm');
+const multiaddr = (a) => esm().multiaddr(a);
 
 // Public libp2p bootstrap nodes (for initial peer discovery)
 const BOOTSTRAP_NODES = [
@@ -57,7 +45,6 @@ const BOOTSTRAP_NODES = [
   '/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb',
   '/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt'
 ];
-const { fromString, toString } = require('uint8arrays');
 const crypto = require('crypto');
 const EventEmitter = require('events');
 const { v4: uuidv4 } = require('uuid');
@@ -121,7 +108,25 @@ class P2PNode extends EventEmitter {
     // Load saved peers from previous sessions
     this.loadKnownPeers();
 
+    const {
+      createLibp2p, tcp, webSockets, noise, yamux, identify, kadDHT, gossipsub, mdns,
+      circuitRelayTransport, circuitRelayServer, autoNAT, dcutr, bootstrap
+    } = await loadEsm();
+
+    // Persistent libp2p identity → same Peer ID across restarts
+    // (contacts, chats and offline inboxes are keyed by Peer ID)
+    const { generateKeyPair, privateKeyToProtobuf, privateKeyFromProtobuf } = esm();
+    let privateKey;
+    const saved = this.crypto.loadSecret('libp2p.key');
+    if (saved?.key) {
+      privateKey = privateKeyFromProtobuf(Buffer.from(saved.key, 'base64'));
+    } else {
+      privateKey = await generateKeyPair('Ed25519');
+      this.crypto.saveSecret('libp2p.key', { key: Buffer.from(privateKeyToProtobuf(privateKey)).toString('base64') });
+    }
+
     this.node = await createLibp2p({
+      privateKey,
       addresses: {
         listen: [
           '/ip4/0.0.0.0/tcp/0',              // TCP - works on any port
@@ -132,11 +137,9 @@ class P2PNode extends EventEmitter {
       transports: [
         tcp(),
         webSockets(),
-        circuitRelayTransport({             // Connect THROUGH other peers
-          discoverRelays: 2                 // Find 2 relay nodes
-        })
+        circuitRelayTransport()             // Connect THROUGH other peers (relays found via '/p2p-circuit' listen addr)
       ],
-      connectionEncryption: [noise()],
+      connectionEncrypters: [noise()],
       streamMuxers: [yamux()],
       services: {
         identify: identify(),
@@ -149,7 +152,11 @@ class P2PNode extends EventEmitter {
           reservations: {
             maxReservations: 128,           // How many peers we relay for
             reservationTtl: 60 * 60 * 1000, // 1 hour reservation
-            defaultDataLimit: BigInt(1024 * 1024 * 10) // 10MB per reservation
+            // Per relayed connection. 10MB default would cut off video replicas;
+            // DCUtR upgrades to direct when hole punching works, so this only
+            // caps the worst case (both peers behind symmetric NAT).
+            defaultDataLimit: BigInt(256 * 1024 * 1024),   // 256MB
+            defaultDurationLimit: 30 * 60 * 1000             // 30 min
           }
         }),
         
@@ -220,6 +227,20 @@ class P2PNode extends EventEmitter {
       .update(this.peerId)
       .digest('hex');
 
+    // Behind NAT most connections are relayed ("limited"). libp2p refuses to
+    // run app protocols on those unless runOnLimitedConnection is set, so
+    // default it on for every handler/dial. Also accept string peer IDs.
+    const { peerIdFromString } = esm();
+    const toPeer = (p) => (typeof p === 'string' && !p.startsWith('/') ? peerIdFromString(p) : p);
+    const rawHandle = this.node.handle.bind(this.node);
+    const rawDialProtocol = this.node.dialProtocol.bind(this.node);
+    const rawDial = this.node.dial.bind(this.node);
+    this.node.handle = (proto, handler, opts = {}) =>
+      rawHandle(proto, handler, { runOnLimitedConnection: true, ...opts });
+    this.node.dialProtocol = (peer, proto, opts = {}) =>
+      rawDialProtocol(toPeer(peer), proto, { runOnLimitedConnection: true, ...opts });
+    this.node.dial = (peer, opts) => rawDial(toPeer(peer), opts);
+
     // Setup
     await this.setupProtocols();
     this.setupEventHandlers();
@@ -227,6 +248,11 @@ class P2PNode extends EventEmitter {
 
     // Initialize Tailscale-inspired crypto and naming
     await this.initializeCrypto();
+
+    // Offline inbox (store-and-forward on volunteer PCs)
+    const { Inbox } = require('./inbox');
+    this.inbox = new Inbox(this);
+    await this.inbox.start();
     
     // Initialize relay server and client (volunteer node support)
     await this.initializeRelay();
@@ -339,6 +365,12 @@ class P2PNode extends EventEmitter {
 
       // Send our presence/username to the new peer
       this.sendPresenceToPeer(peerId);
+
+      // Swap inbox keys + pull any messages this peer is holding for us
+      this.inbox?.onPeerConnected(peerId);
+
+      // Push videos that still need replicas
+      this.retryPendingReplication?.(peerId);
 
       this.emit('peer:connected', { 
         id: peerId,
@@ -550,41 +582,12 @@ class P2PNode extends EventEmitter {
       }
     }
 
-    // METHOD 3: Store on relay network for offline delivery (BitTorrent-style)
-    if (!delivered) {
+    // METHOD 3: Sealed store-and-forward on volunteer PCs (recipient offline)
+    if (!delivered && this.inbox) {
       try {
-        // Get recipient's public key from registry
-        const recipientInfo = await this.registry?.lookup(recipientId);
-        if (recipientInfo?.publicKey) {
-          // Encrypt message for recipient
-          const encrypted = this.crypto.encryptForRecipient(
-            JSON.stringify(payload),
-            recipientInfo.publicKey
-          );
-          
-          // Store on our local relay (other relays will sync via gossip)
-          this.messageStore.storeMessage(
-            recipientInfo.publicKey,
-            encrypted,
-            this.crypto.getPublicKey()
-          );
-          
-          // Announce via gossip that messages are waiting
-          const pubsub = this.node.services.pubsub;
-          await pubsub.publish(
-            'p2p-chat:offline-notify',
-            fromString(JSON.stringify({
-              recipient: recipientId,
-              relay: this.peerId,
-              count: this.messageStore.getMessageCount(recipientInfo.publicKey)
-            }))
-          );
-          
-          console.log(`[MessageStore] Stored message for offline user ${recipientId.slice(-8)}`);
-          delivered = true;
-        }
+        delivered = (await this.inbox.sendOffline(recipientId, payload)) > 0;
       } catch (e) {
-        console.log('Relay store failed:', e.message);
+        console.log('Offline store failed:', e.message);
       }
     }
 
@@ -1005,6 +1008,13 @@ class P2PNode extends EventEmitter {
       this.videoProtocol = new VideoProtocol(this.node, this.videoStore);
       await this.videoProtocol.start();
       
+      // Re-queue our uploads that never reached 3 replicas
+      this.pendingReplication = new Set(
+        this.videoStore.getSeedingVideos()
+          .filter((v) => v.uploader === this.peerId && (v.replicas || []).length < 3)
+          .map((v) => v.id)
+      );
+
       // Re-announce videos we're seeding
       for (const video of this.videoStore.getSeedingVideos()) {
         await this.videoProtocol.announceVideo(video);
@@ -1018,6 +1028,7 @@ class P2PNode extends EventEmitter {
 
   /**
    * Upload a video to the P2P network
+   * IMPORTANT: Also replicates to other peers for availability
    */
   async uploadVideo(filePath, metadata) {
     const video = await this.videoStore.uploadVideo(filePath, {
@@ -1031,7 +1042,59 @@ class P2PNode extends EventEmitter {
       await this.videoProtocol.announceVideo(video);
     }
     
+    // REPLICATE to other peers (like BitTorrent seeding)
+    this.replicateVideo(video).catch((e) => console.log("[Video] replication error:", e.message)); // background
+    
     return video;
+  }
+
+  /**
+   * Push full copies of a video to other PCs (target: REPLICA_TARGET copies)
+   * so it stays watchable after the uploader goes offline. Works over relayed
+   * connections too, so it doesn't matter that everyone is behind NAT.
+   */
+  async replicateVideo(video, target = 3) {
+    if (!this.videoProtocol) return 0;
+    const done = new Set(video.replicas || []);
+    const candidates = this.getConnectedPeers()
+      .map((p) => p.id)
+      .filter((id) => id && !done.has(id));
+
+    for (const peerId of candidates) {
+      if (done.size >= target) break;
+      try {
+        await this.videoProtocol.replicateTo(peerId, video);
+        done.add(peerId);
+        console.log(`[Video] "${video.title}" replicated to ${peerId.slice(-8)} (${done.size}/${target})`);
+      } catch (e) {
+        console.log(`[Video] ${peerId.slice(-8)} declined replica: ${e.message}`);
+      }
+    }
+
+    video.replicas = [...done];
+    this.videoStore.saveIndex();
+    if (done.size < target) {
+      this.pendingReplication = this.pendingReplication || new Set();
+      this.pendingReplication.add(video.id);
+      console.log(`[Video] "${video.title}" has ${done.size}/${target} replicas — will retry as peers connect`);
+    } else {
+      this.pendingReplication?.delete(video.id);
+    }
+    return done.size;
+  }
+
+  /** On each new connection, top up videos that are under-replicated */
+  async retryPendingReplication(peerId) {
+    if (!this.pendingReplication?.size || this._replicating) return;
+    this._replicating = true;
+    try {
+      for (const id of [...this.pendingReplication]) {
+        const video = this.videoStore.getVideo(id);
+        if (video) await this.replicateVideo(video);
+      }
+    } finally {
+      this._replicating = false;
+    }
   }
 
   /**

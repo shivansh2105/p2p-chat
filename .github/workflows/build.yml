@@ -10,6 +10,19 @@ on:
   workflow_dispatch:
 
 jobs:
+  test:
+    # Node 20.18 = the Node version embedded in Electron 33
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.18.3'
+          cache: 'npm'
+      - run: npm ci --ignore-scripts
+      - run: npm test
+        timeout-minutes: 10
+
   build-windows:
     runs-on: windows-latest
     steps:

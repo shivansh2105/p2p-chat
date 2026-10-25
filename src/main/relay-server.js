@@ -439,7 +439,7 @@ class RelayServer extends EventEmitter {
       if (!this.enabled) return;
 
       try {
-        const { fromString } = require('uint8arrays');
+        const { fromString } = require('./esm');
         const relayInfo = {
           type: 'relay',
           peerId: this.node.peerId.toString(),
@@ -490,7 +490,7 @@ class RelayClient {
     this.node.services.pubsub.addEventListener('message', (event) => {
       if (event.detail.topic === 'p2p-chat:relays') {
         try {
-          const { toString } = require('uint8arrays');
+          const { toString } = require('./esm');
           const info = JSON.parse(toString(event.detail.data));
           if (info.type === 'relay' && info.version >= 2) {
             this.knownRelays.set(info.peerId, info);

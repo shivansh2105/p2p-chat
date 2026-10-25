@@ -12,6 +12,8 @@ const { CHUNK_SIZE } = require('./video-store');
 
 const VIDEO_PROTOCOL = '/p2p-chat/video/1.0.0';
 const VIDEO_TOPIC = 'p2p-chat:videos';
+const VIDEO_SYNC_PROTOCOL = '/p2p-chat/video-sync/1.0.0';
+const DEFAULT_QUOTA_MB = 5 * 1024; // each PC donates up to 5 GB by default (opt-out / adjustable)
 
 class VideoProtocol extends EventEmitter {
   constructor(node, videoStore) {
@@ -25,6 +27,20 @@ class VideoProtocol extends EventEmitter {
     // Register protocol handler
     await this.node.handle(VIDEO_PROTOCOL, async ({ stream, connection }) => {
       await this.handleRequest(stream, connection.remotePeer.toString());
+    });
+
+    // Replication receiver: other PCs push copies of videos to us so the
+    // video survives when the uploader goes offline.
+    await this.node.handle(VIDEO_SYNC_PROTOCOL, async ({ stream, connection }) => {
+      let res;
+      try {
+        const chunks = [];
+        for await (const c of stream.source) chunks.push(Buffer.from(c.subarray()));
+        res = this.handleSync(JSON.parse(Buffer.concat(chunks).toString()), connection.remotePeer.toString());
+      } catch (e) {
+        res = { ok: false, error: e.message };
+      }
+      try { await stream.sink([Buffer.from(JSON.stringify(res))]); } catch {}
     });
 
     // Subscribe to video announcements
@@ -78,6 +94,73 @@ class VideoProtocol extends EventEmitter {
     }
   }
 
+  storageEnabled() {
+    return this.videoStore.store?.get('storageEnabled', true) ?? true;
+  }
+
+  quotaBytes() {
+    return (this.videoStore.store?.get('storageQuotaMB', DEFAULT_QUOTA_MB) ?? DEFAULT_QUOTA_MB) * 1024 * 1024;
+  }
+
+  handleSync(req, fromPeer) {
+    if (!this.storageEnabled()) return { ok: false, error: 'storage disabled' };
+    const vs = this.videoStore;
+    if (req.type === 'VIDEO_METADATA') {
+      const v = req.video;
+      if (!v || typeof v.id !== 'string' || !Array.isArray(v.chunkHashes) || !v.contentHash) return { ok: false, error: 'bad metadata' };
+      if (v.id !== v.contentHash.slice(0, 16)) return { ok: false, error: 'id/hash mismatch' };
+      if (v.chunkHashes.length !== Math.ceil(v.size / CHUNK_SIZE)) return { ok: false, error: 'bad chunk count' };
+      if (vs.getUsedBytes() + v.size > this.quotaBytes()) return { ok: false, error: 'quota full' };
+      vs.addVideoFromNetwork({ ...v, replicaFrom: fromPeer });
+      return { ok: true, have: vs.getAvailableChunks(v.id) };
+    }
+    if (req.type === 'VIDEO_CHUNK') {
+      const video = vs.getVideo(req.videoId);
+      if (!video || !video.chunkHashes.includes(req.chunkHash)) return { ok: false, error: 'unknown chunk' };
+      const data = Buffer.from(req.data || '', 'base64');
+      if (data.length > CHUNK_SIZE) return { ok: false, error: 'chunk too big' };
+      if (vs.getUsedBytes() + data.length > this.quotaBytes()) return { ok: false, error: 'quota full' };
+      vs.storeChunk(req.chunkHash, data); // verifies sha256
+      if (vs.getMissingChunks(video.id).length === 0 && vs.verifyComplete(video.id)) {
+        vs.markAsSeeding(video.id);
+        this.emit('replicaComplete', video);
+      }
+      return { ok: true };
+    }
+    return { ok: false, error: 'unknown type' };
+  }
+
+  /**
+   * Push a full copy of a video to one peer. Skips chunks it already has.
+   */
+  async replicateTo(peerId, video) {
+    const meta = await this.sendSync(peerId, { type: 'VIDEO_METADATA', video: {
+      id: video.id, title: video.title, description: video.description, tags: video.tags,
+      duration: video.duration, size: video.size, chunkSize: video.chunkSize, chunkCount: video.chunkCount,
+      chunkHashes: video.chunkHashes, contentHash: video.contentHash, mimeType: video.mimeType,
+      thumbnail: video.thumbnail, uploader: video.uploader, uploaderName: video.uploaderName,
+      uploadedAt: video.uploadedAt
+    }});
+    if (!meta.ok) throw new Error(meta.error || 'rejected');
+    const have = new Set(meta.have || []);
+    for (const hash of video.chunkHashes) {
+      if (have.has(hash)) continue;
+      const data = this.videoStore.getChunk(hash);
+      if (!data) continue;
+      const r = await this.sendSync(peerId, { type: 'VIDEO_CHUNK', videoId: video.id, chunkHash: hash, data: data.toString('base64') });
+      if (!r.ok) throw new Error(r.error || 'chunk rejected');
+    }
+    return true;
+  }
+
+  async sendSync(peerId, body) {
+    const stream = await this.node.dialProtocol(peerId, VIDEO_SYNC_PROTOCOL, { signal: AbortSignal.timeout(60000) });
+    await stream.sink([Buffer.from(JSON.stringify(body))]);
+    const chunks = [];
+    for await (const c of stream.source) chunks.push(Buffer.from(c.subarray()));
+    return JSON.parse(Buffer.concat(chunks).toString() || '{}');
+  }
+
   handleGetVideoInfo(videoId) {
     const video = this.videoStore.getVideo(videoId);
     if (!video) return { error: 'Video not found' };
@@ -114,9 +197,16 @@ class VideoProtocol extends EventEmitter {
         id: v.id,
         title: v.title,
         description: v.description,
+        tags: v.tags,
         duration: v.duration,
         size: v.size,
-        uploader: v.uploaderName,
+        chunkSize: v.chunkSize,
+        chunkCount: v.chunkCount,
+        chunkHashes: v.chunkHashes,
+        contentHash: v.contentHash,
+        mimeType: v.mimeType,
+        uploader: v.uploader,
+        uploaderName: v.uploaderName,
         uploadedAt: v.uploadedAt,
         views: v.views,
         seeders: v.seeders
@@ -145,7 +235,9 @@ class VideoProtocol extends EventEmitter {
       const data = JSON.parse(Buffer.from(message.data).toString());
       
       if (data.type === 'NEW_VIDEO') {
-        this.videoStore.addVideoFromNetwork(data.video);
+        const v = data.video;
+        if (!v?.contentHash || v.id !== v.contentHash.slice(0, 16) || !Array.isArray(v.chunkHashes)) return;
+        this.videoStore.addVideoFromNetwork(v);
         this.emit('newVideo', data.video);
       } else if (data.type === 'SEEDING') {
         // Peer is seeding a video - update seeder count
@@ -175,6 +267,8 @@ class VideoProtocol extends EventEmitter {
         size: video.size,
         chunkCount: video.chunkCount,
         chunkHashes: video.chunkHashes,
+        contentHash: video.contentHash,
+        chunkSize: video.chunkSize,
         mimeType: video.mimeType,
         uploader: video.uploader,
         uploaderName: video.uploaderName,
@@ -220,6 +314,9 @@ class VideoProtocol extends EventEmitter {
       if (!seen.has(video.id)) {
         seen.add(video.id);
         combined.push(video);
+        if (Array.isArray(video.chunkHashes) && video.contentHash?.slice(0, 16) === video.id) {
+          this.videoStore.addVideoFromNetwork(video);
+        }
       }
     }
 
@@ -278,6 +375,7 @@ class VideoProtocol extends EventEmitter {
     // Check if complete
     const stillMissing = this.videoStore.getMissingChunks(videoId);
     if (stillMissing.length === 0) {
+      if (!this.videoStore.verifyComplete(videoId)) throw new Error('Video content hash mismatch');
       this.videoStore.markAsSeeding(videoId);
       return video;
     } else {
@@ -302,4 +400,4 @@ class VideoProtocol extends EventEmitter {
   }
 }
 
-module.exports = { VideoProtocol, VIDEO_PROTOCOL, VIDEO_TOPIC };
+module.exports = { VideoProtocol, VIDEO_PROTOCOL, VIDEO_TOPIC, VIDEO_SYNC_PROTOCOL };

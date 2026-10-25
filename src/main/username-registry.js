@@ -8,7 +8,7 @@
  * - Input validation and sanitization
  */
 
-const { toString: uint8ArrayToString, fromString: uint8ArrayFromString } = require('uint8arrays');
+const { toString: uint8ArrayToString, fromString: uint8ArrayFromString } = require('./esm');
 const crypto = require('crypto');
 
 // Allowed coordination server domains (whitelist approach)

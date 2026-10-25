@@ -30,12 +30,14 @@ class MessageStore extends EventEmitter {
    * Store an encrypted message for a recipient
    * Called when recipient is offline
    */
-  storeMessage(recipientPubKey, encryptedMessage, senderPubKey) {
+  storeMessage(recipientPubKey, encryptedMessage, senderPubKey, id) {
     if (encryptedMessage.length > MAX_MESSAGE_SIZE) {
       throw new Error('Message too large');
     }
 
-    const messageId = crypto.randomBytes(16).toString('hex');
+    const messageId = (typeof id === 'string' && id.length <= 64) ? id : crypto.randomBytes(16).toString('hex');
+    const existing = this.messages.get(recipientPubKey);
+    if (existing && existing.some(m => m.id === messageId)) return messageId; // already holding it
     const message = {
       id: messageId,
       encrypted: encryptedMessage,
