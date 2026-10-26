@@ -124,18 +124,27 @@ class TunnelManager extends EventEmitter {
     });
   }
 
+  // The address itself is added by P2PNode's announceFilter (reads this.addrMa);
+  // here we only set it and make libp2p re-publish our address list (identify
+  // push to connected peers + peer record).
   announce(host) {
     const { multiaddr } = require('./esm').esm();
     this.addrMa = multiaddr(`/dns4/${host}/tcp/443/wss`);
-    this.p2p.node.components.addressManager.confirmObservedAddr(this.addrMa);
     this.addr = `${this.addrMa.toString()}/p2p/${this.p2p.peerId}`;
+    this.refreshAddresses();
   }
 
   unannounce() {
-    if (this.addrMa) {
-      try { this.p2p.node.components.addressManager.removeObservedAddr(this.addrMa); } catch {}
-    }
+    const had = !!this.addrMa;
     this.addrMa = null; this.addr = null; this.url = null;
+    if (had) this.refreshAddresses();
+  }
+
+  refreshAddresses() {
+    try {
+      const am = this.p2p.node?.components?.addressManager;
+      if (typeof am?._updatePeerStoreAddresses === 'function') am._updatePeerStoreAddresses();
+    } catch (e) { /* DHT records still carry it: announceSelf runs on 'ready' */ }
   }
 
   stop() {

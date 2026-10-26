@@ -143,7 +143,18 @@ class P2PNode extends EventEmitter {
           '/p2p-circuit'                      // Listen via relay (for NAT traversal)
         ],
         // Servers with a public IP/domain announce it explicitly (headless mode --public-ip)
-        appendAnnounce: this.store?.get('announceAddrs', []) || []
+        appendAnnounce: this.store?.get('announceAddrs', []) || [],
+        // Runtime-only public address (free Cloudflare tunnel, URL changes per
+        // restart) → announced in identify + DHT records so others can dial it.
+        // (confirmObservedAddr() can't do this: libp2p ignores untracked addrs
+        // and would misread a DNS host as an IP mapping.)
+        announceFilter: (addrs) => {
+          const t = this.tunnel?.addrMa;
+          if (!t) return addrs;
+          const self = addrs[0]?.getPeerId?.() || this.node?.peerId?.toString();
+          const ma = self ? t.encapsulate(`/p2p/${self}`) : t;
+          return addrs.some((a) => a.equals(ma)) ? addrs : [...addrs, ma];
+        }
       },
       // Don't fail startup if IPv6 (or any one listener) isn't available
       transportManager: { faultTolerance: 1 /* FaultTolerance.NO_FATAL */ },

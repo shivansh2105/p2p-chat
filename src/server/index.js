@@ -150,7 +150,8 @@ async function main() {
     console.log(`Storage : ${s.videos.videosSeeding} videos seeding, ${s.videos.totalSizeMB} MB / ${cfg.storageGb} GB; ${s.mailbox.totalMessages} sealed messages held`);
     if (s.tunnel) console.log(`Tunnel  : ${s.tunnel}`);
     if (s.bittorrent) console.log(`BitTorrent: ${s.bittorrent.active ? 'active on port ' + s.bittorrent.port : 'not running (optional)'}`);
-    console.log('Add one of these to src/main/servers.js (and a /ws one to mobile/src/servers.js):');
+    console.log('Nothing to register: this node announces itself on the DHT and apps find it automatically.');
+    console.log('Its current addresses (optional: pin a FIXED one in src/main/servers.js / mobile/src/servers.js for instant first contact):');
     for (const a of [...new Set([...cfg.announce.map((x) => `${x}/p2p/${s.peerId}`), ...s.addresses])].slice(0, 6)) console.log('  ' + a);
     if (cfg.http) console.log(`Health  : http://${cfg.httpHost}:${cfg.http}/health`);
     console.log('═════════════════════════════════════\n');

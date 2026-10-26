@@ -99,6 +99,8 @@ class Discovery {
   stop() {
     if (this.timer) clearInterval(this.timer);
     if (this.rvTimers) this.rvTimers.forEach(clearInterval);
+    this.rvStopped = true;
+    clearTimeout(this.rvFindTimer);
   }
 
   // ───────────────────────── rendezvous ─────────────────────────
@@ -157,13 +159,26 @@ class Discovery {
   }
 
   startRendezvous() {
+    const st = this.p2p.store;
+    const every = st?.get('rendezvousEveryMs', 5 * 60 * 1000) ?? 5 * 60 * 1000;
+    const lonely = Math.min(st?.get('rendezvousLonelyMs', 30000) ?? 30000, every);
     const announce = () => this.announceSelf().catch(() => {});
-    const find = () => this.findNodes().catch(() => {});
-    setTimeout(() => { announce(); find(); }, this.p2p.store?.get('rendezvousDelayMs', 5000) ?? 5000).unref?.();
-    this.rvTimers = [
-      setInterval(announce, 30 * 60 * 1000),
-      setInterval(find, this.p2p.store?.get('rendezvousEveryMs', 5 * 60 * 1000) ?? 5 * 60 * 1000)
-    ];
+    // While we have NO app peers, look again soon (30s, 60s, 120s… up to
+    // `every`): a node that just came online may still be publishing its
+    // record. Once connected, relax to `every`.
+    let misses = 0;
+    const loop = async () => {
+      if (this.rvStopped) return;
+      const have = await this.findNodes().catch(() => 0);
+      misses = have > 0 ? 0 : misses + 1;
+      const next = have > 0 ? every : Math.min(lonely * 2 ** (misses - 1), every);
+      if (this.rvStopped) return;
+      this.rvFindTimer = setTimeout(loop, next);
+      this.rvFindTimer.unref?.();
+    };
+    this.rvFindTimer = setTimeout(() => { announce(); loop(); }, st?.get('rendezvousDelayMs', 5000) ?? 5000);
+    this.rvFindTimer.unref?.();
+    this.rvTimers = [setInterval(announce, 30 * 60 * 1000)];
     this.rvTimers.forEach((t) => t.unref?.());
     // A new public address (tunnel restart, UPnP mapping) → re-announce right away
     this.p2p.tunnel?.on?.('ready', announce);

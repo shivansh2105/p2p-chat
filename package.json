@@ -16,7 +16,8 @@
     "probe:internet": "node test/probe-bootstrap.js && node test/probe-public-relay.js && node test/probe-nat.js && node test/probe-provide.js",
     "probe:tunnel": "node test/probe-tunnel.js",
     "probe:magnet": "node test/probe-magnet.mjs",
-    "server": "node src/server/index.js"
+    "server": "node src/server/index.js",
+    "probe:autojoin": "node test/probe-autojoin.js"
   },
   "build": {
     "appId": "com.p2pchat.app",
