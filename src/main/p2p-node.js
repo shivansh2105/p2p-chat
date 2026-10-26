@@ -661,7 +661,9 @@ class P2PNode extends EventEmitter {
       }
     }
 
-    // METHOD 2: Gossip to recipient's topic
+    // METHOD 2: Gossip to recipient's topic — best effort only. Gossip has no
+    // acknowledgement (and allowPublishToZeroPeers makes publish "succeed" even
+    // when nobody is listening), so it never counts as delivered.
     if (!delivered) {
       try {
         const pubsub = this.node.services.pubsub;
@@ -669,13 +671,12 @@ class P2PNode extends EventEmitter {
           `p2p-chat:user:${recipientId}`,
           fromString(JSON.stringify(payload))
         );
-        delivered = true;
-      } catch (e) {
-        console.log('Gossip failed');
-      }
+      } catch (e) { /* nobody subscribed */ }
     }
 
-    // METHOD 3: Sealed store-and-forward on volunteer PCs (recipient offline)
+    // METHOD 3: Sealed store-and-forward on volunteer PCs whenever there was no
+    // direct ACK. The recipient de-duplicates by message id, so if gossip did
+    // reach them too, they still see it once.
     if (!delivered && this.inbox) {
       try {
         delivered = (await this.inbox.sendOffline(recipientId, payload)) > 0;

@@ -31,7 +31,7 @@ function startServer() {
 function client(name, serverAddr, dir) {
   dir = dir || fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), `p2p-${name}-`));
   const store = { m: new Map(), get(k, d) { return this.m.has(k) ? this.m.get(k) : d; }, set(k, v) { this.m.set(k, v); }, delete(k) { this.m.delete(k); } };
-  for (const [k, v] of Object.entries({ user: { username: name }, bootstrap: false, extraBootstrap: [serverAddr], mdns: false, upnp: false, tunnel: false, bittorrent: false })) store.set(k, v);
+  for (const [k, v] of Object.entries({ user: { username: name }, bootstrap: false, extraBootstrap: [serverAddr], mdns: false, upnp: false, tunnel: false, bittorrent: false, rendezvous: false })) store.set(k, v);
   return new P2PNode({ async addMessage() {}, getMessagesSince() { return []; }, updateContactUsername() {} }, store, dir);
 }
 
