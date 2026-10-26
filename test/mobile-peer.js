@@ -7,7 +7,7 @@ const { P2PNode } = require('../src/main/p2p-node');
 (async () => {
   const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'p2p-desk-'));
   const store = { m: new Map(), get(k, d) { return this.m.has(k) ? this.m.get(k) : d; }, set(k, v) { this.m.set(k, v); }, delete(k) { this.m.delete(k); } };
-  store.set('user', { username: 'desktop' }); store.set('bootstrap', false); store.set('mdns', false); store.set('upnp', false); store.set('tunnel', process.env.TUNNEL === '1'); store.set('bittorrent', process.env.BITTORRENT === '1');
+  store.set('user', { username: 'desktop' }); store.set('bootstrap', false); store.set('mdns', false); store.set('upnp', false); store.set('tunnel', process.env.TUNNEL === '1'); store.set('bittorrent', process.env.BITTORRENT === '1'); store.set('rendezvous', false);
   const n = new P2PNode({ async addMessage() {}, getMessagesSince() { return []; }, updateContactUsername() {} }, store, dir);
   await n.start();
 

@@ -21,7 +21,7 @@ function makeNode(name, opts = {}) {
   const store = { m: new Map(), get(k, d) { return this.m.has(k) ? this.m.get(k) : d; }, set(k, v) { this.m.set(k, v); }, delete(k) { this.m.delete(k); } };
   store.set('user', { username: name });
   store.set('bootstrap', false);
-  store.set('tunnel', false); store.set('bittorrent', false);
+  store.set('tunnel', false); store.set('bittorrent', false); store.set('rendezvous', false);
   const db = { async addMessage() {}, getMessagesSince() { return []; }, updateContactUsername() {} };
   return new P2PNode(db, store, dir);
 }

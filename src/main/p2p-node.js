@@ -110,7 +110,8 @@ class P2PNode extends EventEmitter {
 
     const {
       createLibp2p, tcp, webSockets, noise, yamux, identify, kadDHT, gossipsub, mdns,
-      circuitRelayTransport, circuitRelayServer, autoNAT, dcutr, bootstrap, passthroughMapper, uPnPNAT
+      circuitRelayTransport, circuitRelayServer, autoNAT, dcutr, bootstrap, uPnPNAT,
+      removePrivateAddressesMapper, removePublicAddressesMapper
     } = await loadEsm();
 
     // Persistent libp2p identity → same Peer ID across restarts
@@ -189,18 +190,26 @@ class P2PNode extends EventEmitter {
         // KADEMLIA DHT - Heart of serverless peer discovery
         // Same algorithm BitTorrent uses to find peers without trackers
         // ═══════════════════════════════════════════════════════════
+        // Dual DHT (like IPFS Kubo): the PUBLIC Amino DHT ignores private
+        // addresses (otherwise unreachable peers poison lookups and records
+        // published by one node can't be found by another); a separate LAN
+        // DHT keeps only private addresses so same-WiFi users still find
+        // each other. contentRouting queries/publishes on both.
         dht: kadDHT({
-          clientMode: false,           // We ARE the DHT network
-          // Default mapper drops peers with private IPs → LAN users (and
-          // NAT'd PCs before they get a relay address) never enter the routing table
-          peerInfoMapper: passthroughMapper,
-          kBucketSize: 20,             // Standard Kademlia bucket size
-          randomWalk: {
-            enabled: true,             // Actively explore network
-            interval: 60000,           // Every minute
-            timeout: 10000
-          },
+          protocol: '/ipfs/kad/1.0.0',
+          clientMode: false,
+          kBucketSize: 20,
+          peerInfoMapper: removePrivateAddressesMapper,
+          randomWalk: { enabled: true, interval: 60000, timeout: 10000 },
           providers: { enabled: true }
+        }),
+        lanDht: kadDHT({
+          protocol: '/ipfs/lan/kad/1.0.0',
+          clientMode: false,
+          peerInfoMapper: removePublicAddressesMapper,
+          logPrefix: 'libp2p:dht-lan',
+          datastorePrefix: '/dht-lan',
+          metricsPrefix: 'libp2p_dht_lan'
         }),
 
         // ═══════════════════════════════════════════════════════════
@@ -340,6 +349,9 @@ class P2PNode extends EventEmitter {
       this.tunnel = new TunnelManager(this);
       this.tunnel.start().catch((e) => console.log('[Tunnel] unavailable:', e.message));
     }
+
+    // Zero-config discovery: announce ourselves + find other nodes via the DHT
+    if (this.store?.get('rendezvous', true) ?? true) this.discovery.startRendezvous();
 
     // Get shareable addresses
     this.publicAddresses = this.getShareableAddresses();

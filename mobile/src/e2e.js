@@ -11,10 +11,26 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 (async () => {
   const peer = new URLSearchParams(location.search).get('peer');
   const m = await new MobileNode().start();
+  window.__m = m;
   ok('mobile libp2p node starts in browser', !!m.peerId, m.peerId.slice(-8));
 
-  const deskId = await m.dial(peer);
-  ok('phone connects to desktop over WebSocket', !!deskId);
+  let deskId;
+  if (peer) {
+    deskId = await m.dial(peer);
+    ok('phone connects to desktop over WebSocket', !!deskId);
+  } else {
+    // Zero-config: public bootstrap → DHT rendezvous → a desktop/server
+    const t0 = Date.now();
+    for (let i = 0; i < 90 && !deskId; i++) {
+      await m.findNodes().catch(() => {});
+      deskId = (await m.appPeers('/p2p-chat/video-sync/1.0.0'))[0];
+      if (!deskId) await sleep(2000);
+    }
+    const conn = deskId && m.node.getConnections().find((c) => c.remotePeer.toString() === deskId);
+    ok('phone finds a desktop with NO address (public DHT rendezvous)', !!deskId,
+      deskId ? `${((Date.now() - t0) / 1000).toFixed(0)}s via ${conn?.remoteAddr.toString().split('/p2p/')[0]}` : '');
+    if (!deskId) throw new Error('no desktop found');
+  }
   await sleep(1500);
 
   ok('desktop advertises app protocols', (await m.appPeers('/p2p-chat/video-sync/1.0.0')).includes(deskId));

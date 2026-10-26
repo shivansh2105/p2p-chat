@@ -53,6 +53,8 @@ async function loadEsm() {
     identify: identify.identify,
     kadDHT: dht.kadDHT,
     passthroughMapper: dht.passthroughMapper,
+    removePrivateAddressesMapper: dht.removePrivateAddressesMapper,
+    removePublicAddressesMapper: dht.removePublicAddressesMapper,
     gossipsub: gossipsub.gossipsub,
     mdns: mdns.mdns,
     circuitRelayTransport: relay.circuitRelayTransport,

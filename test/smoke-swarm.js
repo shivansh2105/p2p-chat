@@ -27,8 +27,8 @@ function mk(name, dir, extra = {}) {
   const store = { m: new Map(), get(k, d) { return this.m.has(k) ? this.m.get(k) : d; }, set(k, v) { this.m.set(k, v); }, delete(k) { this.m.delete(k); } };
   store.set('user', { username: name });
   store.set('bootstrap', false);
-  store.set('tunnel', false); store.set('bittorrent', false); // isolate from public network
-  store.set('tunnel', false); store.set('bittorrent', false);
+  store.set('tunnel', false); store.set('bittorrent', false); store.set('rendezvous', false); // isolate from public network
+  store.set('tunnel', false); store.set('bittorrent', false); store.set('rendezvous', false);
   store.set('mdns', false);      // no LAN auto-discovery: only explicit links + DHT
   for (const [k, v] of Object.entries(extra)) store.set(k, v);
   return new P2PNode({ async addMessage() {}, getMessagesSince() { return []; }, updateContactUsername() {} }, store, dir);
@@ -63,6 +63,11 @@ async function link(x, y) {
   await link(D, E);
   ok('D starts knowing only E', !D.connectedPeers.has(B.peerId) && !D.connectedPeers.has(C.peerId));
 
+  if (process.env.P2P_DEBUG) {
+    const t = Date.now(); const pv = await D.discovery.findProviders('kw:goa', { max: 10, timeout: 15000 });
+    console.log('debug kw:goa providers', pv.map((p) => p.id.toString().slice(-6)), 'in', Date.now() - t, 'ms', 'B', B.peerId.slice(-6), 'C', C.peerId.slice(-6),
+      'lanRT', D.node.services.lanDht.routingTable.size, 'pubRT', D.node.services.dht.routingTable.size);
+  }
   const results = await D.searchVideos('goa');
   ok('D finds video network-wide via DHT keyword record', results.some((r) => r.id === video.id));
 

@@ -8,7 +8,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function mk(name) {
   const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'p2p-' + name + '-'));
   const store = { m: new Map(), get(k, d) { return this.m.has(k) ? this.m.get(k) : d; }, set(k, v) { this.m.set(k, v); }, delete(k) { this.m.delete(k); } };
-  for (const [k, v] of Object.entries({ bootstrap: false, mdns: false, upnp: false, tunnel: false, bittorrent: false, user: { username: name } })) store.set(k, v);
+  for (const [k, v] of Object.entries({ bootstrap: false, mdns: false, upnp: false, tunnel: false, bittorrent: false, rendezvous: false, user: { username: name } })) store.set(k, v);
   return new P2PNode({ async addMessage() {}, getMessagesSince() { return []; }, updateContactUsername() {} }, store, dir);
 }
 (async () => {

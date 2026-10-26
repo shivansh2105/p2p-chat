@@ -4,7 +4,7 @@ const { app, BrowserWindow } = require('electron');
 app.whenReady().then(async () => {
   const win = new BrowserWindow({ show: false, webPreferences: { contextIsolation: true } });
   await win.loadURL(process.argv[process.argv.length - 1]);
-  for (let i = 0; i < 150; i++) {
+  for (let i = 0; i < 330; i++) {
     const done = await win.webContents.executeJavaScript('window.__e2e && window.__e2e.done');
     if (done) break;
     await new Promise((r) => setTimeout(r, 1000));

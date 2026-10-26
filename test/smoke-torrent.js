@@ -16,7 +16,7 @@ function mk(name, extra = {}) {
   const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), `p2p-${name}-`));
   const store = { m: new Map(), get(k, d) { return this.m.has(k) ? this.m.get(k) : d; }, set(k, v) { this.m.set(k, v); }, delete(k) { this.m.delete(k); } };
   for (const [k, v] of Object.entries({ user: { username: name }, bootstrap: false, mdns: false, upnp: false, tunnel: false,
-    bittorrent: true, torrentDht: false, torrentLsd: false, ...extra })) store.set(k, v);
+    bittorrent: true, torrentDht: false, torrentLsd: false, rendezvous: false, ...extra })) store.set(k, v);
   return new P2PNode({ async addMessage() {}, getMessagesSince() { return []; }, updateContactUsername() {} }, store, dir);
 }
 const res = []; const ok = (n, c, x = '') => { res.push(!!c); console.log(`${c ? 'PASS' : 'FAIL'}  ${n} ${x}`); };

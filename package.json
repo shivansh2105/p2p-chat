@@ -12,8 +12,8 @@
     "build:win": "electron-builder --win --x64 --publish never",
     "build:mac": "electron-builder --mac --publish never",
     "build:linux": "electron-builder --linux --publish never",
-    "test": "node test/smoke.js --offline && node test/smoke.js --video && node test/smoke-relay.js && node test/smoke-swarm.js && node test/smoke-torrent.js && node test/smoke-server.js",
-    "probe:internet": "node test/probe-bootstrap.js && node test/probe-public-relay.js && node test/probe-nat.js",
+    "test": "node test/smoke.js --offline && node test/smoke.js --video && node test/smoke-relay.js && node test/smoke-swarm.js && node test/smoke-rendezvous.js && node test/smoke-torrent.js && node test/smoke-server.js",
+    "probe:internet": "node test/probe-bootstrap.js && node test/probe-public-relay.js && node test/probe-nat.js && node test/probe-provide.js",
     "probe:tunnel": "node test/probe-tunnel.js",
     "probe:magnet": "node test/probe-magnet.mjs",
     "server": "node src/server/index.js"

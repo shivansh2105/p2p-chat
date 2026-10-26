@@ -14,6 +14,7 @@ Chat and video sharing with **no central server**, built like BitTorrent: every 
 | 🧲 | **BitTorrent backup layer** | Every video is also a normal torrent (🧲 magnet link). uTorrent / qBittorrent users can download and seed it, and the app falls back to those seeders when no app peer has a video. Runs in a separate process, so if it fails, the app just carries on without it |
 | 🧹 | **Smart cleanup** | Your copy is deleted only if your disk is >90% of quota and ≥10 other PCs are confirmed live seeders, or ≥25 are and you haven't watched it in 7 days |
 | 🔗 | **Works behind any NAT, free** | Each PC gets a free public address via a Cloudflare Quick Tunnel (no account), so even strict-NAT/CGNAT PCs become reachable relays. Plus UPnP, IPv6, hole punching, and public IPFS relays |
+| 🧭 | **Zero-config discovery** | Every install announces itself on the DHT, and reachable ones (public IP, UPnP, IPv6, tunnel, servers) also announce as relays. New desktops **and phones** find community nodes with no address typed in, relays first |
 | 🙋 | **Usernames** | Find people by @username via the DHT |
 | 📱 | **Phone + PC, one network** | The Android app runs libp2p in the WebView. It joins PCs over WebSocket, reaches the rest via their relays, and uses WebRTC + TURN between phones |
 | ☁️ | **Google Drive backup** | Optional, encrypted |
@@ -51,7 +52,7 @@ Run an always-on **headless node** (relay + storage + seeder) on any VPS, old PC
 curl -fsSL https://raw.githubusercontent.com/shivansh2105/p2p-chat/master/deploy/install.sh | sudo bash
 ```
 
-Or use `docker build -t p2p-chat-server .`, or `npm run server`. Add its address to `src/main/servers.js` / `mobile/src/servers.js` so every install connects to it first. The network still works without servers. See **[deploy/README.md](deploy/README.md)**.
+Or use `docker build -t p2p-chat-server .`, or `npm run server`. **Every app install is already a server**, and they find each other automatically through DHT rendezvous, so you don't have to list them anywhere. A dedicated always-on node just adds capacity and 24/7 availability. It's found automatically too. Optionally, put a server with a **fixed** address in `src/main/servers.js` / `mobile/src/servers.js` for even faster first contact. See **[deploy/README.md](deploy/README.md)**.
 
 ## Download
 
@@ -65,7 +66,7 @@ See [INSTALL.md](INSTALL.md) for install steps.
 ```bash
 npm install
 npm start               # run the desktop app
-npm test                # 65 end-to-end tests: chat, offline mail, video swarm, relay-only
+npm test                # 72 end-to-end tests: chat, offline mail, video swarm, relay-only
                         # links, safe eviction, BitTorrent interop + fail-safety, headless server
 npm run server          # run a headless always-on node
 npm run probe:internet  # check public relays / hole punching from your network
@@ -108,7 +109,7 @@ cd android && ./gradlew assembleDebug
 
 ## Limitations (honest)
 
-- **The phone needs one PC address to join.** The first time, paste a PC's address (Network tab). After that, the rest of the network is found automatically. Phones seed only while the app is open.
+- **First contact takes a little while.** A brand-new install with nothing configured usually finds the network within 30–90 s via the public DHT. Pasting an address or listing a fixed server in `servers.js` makes it instant. Phones seed only while the app is open.
 - **No video compression.** Videos are stored at their original size.
 - **Free tunnels are best-effort.** Cloudflare Quick Tunnels need no account but have no SLA, allow up to 200 in-flight requests per PC, and the address changes on restart (it's re-announced automatically). `cloudflared` is downloaded from Cloudflare's GitHub releases on first use. Turn it off with the relay setting.
 - **BitTorrent is public.** Seeding a torrent shows your IP to others in that swarm (normal for torrents), and anyone with the magnet can download the video. Turn it off in Videos → "Also share on the BitTorrent network". Desktop only: phones don't join the torrent swarm.

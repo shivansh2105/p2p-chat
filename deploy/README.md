@@ -54,9 +54,13 @@ npm run server -- --public-ip 203.0.113.10 --storage-gb 100 --http 8080
 
 Run `npm run server -- --help` for everything.
 
-## Put your server into the apps
+## Do I need to register my server?
 
-On startup the server prints its addresses. To make every new install connect to it first:
+**No.** Every node announces itself on the DHT ("I'm a P2P Chat node", plus "I can relay" if it's reachable), and new installs find these records automatically. That includes home PCs behind NAT, which use their free tunnel address, re-announced whenever it changes. This also covers an old PC whose tunnel address changes on each restart.
+
+## Optional: build a fixed server into the apps
+
+Only useful for a server with a **fixed** address (public IP or domain). Built-in addresses make first contact instant instead of 30–90 s:
 
 1. Add the TCP address to `src/main/servers.js` (desktop app).
 2. Add the `/ws` address to `mobile/src/servers.js` (Android app).

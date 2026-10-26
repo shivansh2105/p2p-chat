@@ -13,8 +13,9 @@ import { noise } from '@chainsafe/libp2p-noise';
 import { yamux } from '@chainsafe/libp2p-yamux';
 import { identify } from '@libp2p/identify';
 import { circuitRelayTransport } from '@libp2p/circuit-relay-v2';
-import { kadDHT, passthroughMapper } from '@libp2p/kad-dht';
+import { kadDHT, removePrivateAddressesMapper, removePublicAddressesMapper } from '@libp2p/kad-dht';
 import { dcutr } from '@libp2p/dcutr';
+import { bootstrap } from '@libp2p/bootstrap';
 import { generateKeyPair, privateKeyToProtobuf, privateKeyFromProtobuf } from '@libp2p/crypto/keys';
 import { peerIdFromString } from '@libp2p/peer-id';
 import { multiaddr } from '@multiformats/multiaddr';
@@ -33,6 +34,17 @@ export const PROTO = {
   VSYNC: '/p2p-chat/video-sync/1.0.0'
 };
 export const CHUNK_SIZE = 256 * 1024;
+
+// Same rendezvous keys as desktop discovery.js — phones find PCs with zero config
+const NODES_KEY = 'nodes:v1';
+const RELAYS_KEY = 'relays:v1';
+// Public libp2p bootstrap nodes (browsers reach them over secure WebSockets)
+const PUBLIC_BOOTSTRAP = [
+  '/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN',
+  '/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa',
+  '/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb',
+  '/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt'
+];
 
 export const ICE_SERVERS = [
   { urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] },
@@ -79,10 +91,14 @@ export class MobileNode extends EventTarget {
       streamMuxers: [yamux()],
       // Browser default blocks LAN IPs + plain ws:// — we need both for PCs on the same WiFi
       connectionGater: { denyDialMultiaddr: async () => false },
+      peerDiscovery: [bootstrap({ list: [...SERVERS, ...PUBLIC_BOOTSTRAP], timeout: 2000 })],
       services: {
         identify: identify(),
         dcutr: dcutr(),
-        dht: kadDHT({ clientMode: true, peerInfoMapper: passthroughMapper })
+        // Same dual DHT as desktop: public (no private addrs) + LAN (private only)
+        dht: kadDHT({ protocol: '/ipfs/kad/1.0.0', clientMode: true, peerInfoMapper: removePrivateAddressesMapper }),
+        lanDht: kadDHT({ protocol: '/ipfs/lan/kad/1.0.0', clientMode: true, peerInfoMapper: removePublicAddressesMapper,
+          logPrefix: 'libp2p:dht-lan', datastorePrefix: '/dht-lan', metricsPrefix: 'libp2p_dht_lan' })
       }
     });
 
@@ -112,12 +128,39 @@ export class MobileNode extends EventTarget {
     this.peerId = this.node.peerId.toString();
     // Project servers first, then PCs we've used before
     for (const a of [...SERVERS, ...this.knownAddrs]) this.dial(a).catch(() => {});
+    // …and find community PCs/servers by ourselves (no address needed)
+    this.rvTimer = setInterval(() => this.findNodes().catch(() => {}), 2 * 60 * 1000);
+    setTimeout(() => this.findNodes().catch(() => {}), 3000);
     return this;
+  }
+
+  /** Zero-config: connect to reachable app PCs (relays first) and hold a relay slot */
+  async findNodes(target = 4) {
+    let have = (await this.appPeers(PROTO.INBOX)).length;
+    if (have >= target) return have;
+    for (const key of [RELAYS_KEY, NODES_KEY]) {
+      for (const p of await this.findProviders(key, 20)) {
+        if (have >= target) break;
+        const id = p.id.toString();
+        if (this.peers().includes(id)) continue;
+        if (!(await this.connectProvider(p))) continue;
+        have++;
+        if (key === RELAYS_KEY && (this.relaySlots || 0) < 2) {
+          try {
+            await this.node.components.transportManager.listen([multiaddr(`/p2p/${id}/p2p-circuit`)]);
+            this.relaySlots = (this.relaySlots || 0) + 1;
+          } catch {}
+        }
+      }
+      if (have >= target) break;
+    }
+    this.emit('peers');
+    return have;
   }
 
   emit(type, detail) { this.dispatchEvent(new CustomEvent(type, { detail })); }
 
-  async stop() { await this.node?.stop(); }
+  async stop() { clearInterval(this.rvTimer); await this.node?.stop(); }
 
   // ── connections ───────────────────────────────────────────
   async dial(addr) {
@@ -142,9 +185,14 @@ export class MobileNode extends EventTarget {
   }
 
   async request(peer, proto, body, timeout = 20000) {
-    const stream = await this.node.dialProtocol(typeof peer === 'string' ? peerIdFromString(peer) : peer, proto, {
-      runOnLimitedConnection: true, signal: AbortSignal.timeout(timeout)
-    });
+    const pid = typeof peer === 'string' ? peerIdFromString(peer) : peer;
+    let stream;
+    // Prefer an unlimited connection (public relays cap ~128KB / 2 min);
+    // fall back to a relayed one only if that's all there is.
+    if (this.node.getConnections(pid).some((c) => !c.limits)) {
+      stream = await this.node.dialProtocol(pid, proto, { signal: AbortSignal.timeout(timeout) }).catch(() => null);
+    }
+    stream ||= await this.node.dialProtocol(pid, proto, { runOnLimitedConnection: true, signal: AbortSignal.timeout(timeout) });
     await stream.sink([te.encode(JSON.stringify(body))]);
     const res = await readAll(stream);
     return res.length ? JSON.parse(td.decode(res)) : {};
@@ -165,26 +213,66 @@ export class MobileNode extends EventTarget {
     try { await this.node.contentRouting.provide(await this.cidFor(key), { signal: AbortSignal.timeout(60000) }); } catch {}
   }
 
-  async findProviders(key, max = 20) {
+  async findProviders(key, max = 20, timeout = 20000) {
     const out = new Map();
+    const ctrl = new AbortController();
+    let it;
     try {
-      for await (const p of this.node.contentRouting.findProviders(await this.cidFor(key), { signal: AbortSignal.timeout(20000) })) {
-        if (p.id.toString() === this.peerId) continue;
-        out.set(p.id.toString(), p);
-        if (out.size >= max) break;
+      it = this.node.contentRouting.findProviders(await this.cidFor(key), { signal: ctrl.signal })[Symbol.asyncIterator]();
+      const deadline = Date.now() + timeout; // enforced here (libp2p may ignore the signal)
+      let lastHit = 0;
+      while (out.size < max) {
+        // Stop at the deadline, or 1.5s after the last new result: one of the
+        // two DHTs (often the public one) may never signal "done"
+        const left = Math.min(deadline - Date.now(), lastHit ? lastHit + 1500 - Date.now() : Infinity);
+        if (left <= 0) break;
+        let timer;
+        const r = await Promise.race([it.next(), new Promise((res) => { timer = setTimeout(() => res({ timedOut: true }), left); })]);
+        clearTimeout(timer);
+        if (r.timedOut || r.done) break;
+        if (r.value.id.toString() !== this.peerId) out.set(r.value.id.toString(), r.value);
+        lastHit = Date.now();
       }
     } catch {}
+    ctrl.abort();
+    it?.return?.()?.catch?.(() => {});
     return [...out.values()];
   }
 
   async connectProvider(p) {
     const id = p.id.toString();
-    if (this.peers().includes(id)) return true;
     try {
-      if (p.multiaddrs?.length) await this.node.peerStore.merge(p.id, { multiaddrs: p.multiaddrs });
-      await this.node.dial(p.id, { signal: AbortSignal.timeout(20000) });
+      if (!this.peers().includes(id)) {
+        if (p.multiaddrs?.length) await this.node.peerStore.merge(p.id, { multiaddrs: p.multiaddrs });
+        await this.node.dial(p.id, { signal: AbortSignal.timeout(20000) });
+      }
+      await this.upgradeToDirect(p.id);
+      // Key exchange may have failed on the capped relay link — retry on the good one
+      if (!this.peerBoxKeys.has(id)) await this.exchangeKeys(id).catch(() => {});
       return true;
     } catch { return false; }
+  }
+
+  /**
+   * If we only reach a peer through a (capped) relay, dial its own
+   * browser-reachable address — e.g. its free Cloudflare tunnel (wss) —
+   * for an unlimited connection.
+   */
+  async upgradeToDirect(pid) {
+    const conns = this.node.getConnections(pid);
+    if (!conns.length || conns.some((c) => !c.limits)) return;
+    await new Promise((r) => setTimeout(r, 800)); // identify delivers its full address list
+    const info = await this.node.peerStore.get(pid).catch(() => null);
+    const direct = (info?.addresses || []).map((a) => a.multiaddr)
+      .filter((ma) => { const s = ma.toString(); return !s.includes('/p2p-circuit') && (s.includes('/wss') || s.includes('/tls/ws') || s.includes('/ws')); })
+      .sort((a, b) => (b.toString().includes('trycloudflare') ? 1 : 0) - (a.toString().includes('trycloudflare') ? 1 : 0));
+    for (const ma of direct) {
+      try {
+        const addr = ma.toString().includes('/p2p/') ? ma : ma.encapsulate(`/p2p/${pid.toString()}`);
+        await this.node.dial(addr, { force: true, signal: AbortSignal.timeout(15000) });
+        return;
+      } catch {}
+    }
   }
 
   // ── chat + offline mail ────────────────────────────────────
