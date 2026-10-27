@@ -1,6 +1,6 @@
 {
   "name": "p2p-chat",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Decentralized P2P chat app like Telegram with torrent-style networking",
   "main": "src/main/main.js",
   "author": "P2P Chat Community",

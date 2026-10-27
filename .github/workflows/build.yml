@@ -86,17 +86,71 @@ jobs:
             dist/*.deb
           retention-days: 30
 
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Install mobile dependencies
+        working-directory: mobile
+        run: npm ci
+      - name: Build web assets
+        working-directory: mobile
+        run: npm run build
+      - name: Add Android platform
+        working-directory: mobile
+        run: |
+          npx cap add android || true
+          npx cap sync android
+      - name: Build debug APK
+        working-directory: mobile/android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleDebug
+      - name: Name APK after the version / branch
+        shell: bash
+        run: |
+          NAME="${GITHUB_REF_NAME//\//-}"
+          cp mobile/android/app/build/outputs/apk/debug/app-debug.apk "P2P-Chat-Android-${NAME}.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p2p-chat-android
+          path: P2P-Chat-Android-*.apk
+          retention-days: 30
+
   release:
-    needs: [build-windows, build-mac, build-linux]
+    # Only for version tags (v1.2.3), and only if tests + every build passed
+    needs: [test, server-docker, build-windows, build-mac, build-linux, build-android]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
+          name: P2P Chat ${{ github.ref_name }}
+          generate_release_notes: true
+          body: |
+            ### Downloads
+            | Platform | File |
+            |---|---|
+            | Windows | `.exe`: portable, nothing to install. If SmartScreen warns, click **More info → Run anyway** (the app isn't code-signed yet). |
+            | macOS (Apple Silicon) | `.zip`: unzip, then right-click the app → **Open** (not notarized yet). |
+            | Linux | `.AppImage`: `chmod +x` it, then run it. |
+            | Android | `P2P-Chat-Android-${{ github.ref_name }}.apk`: allow "Install unknown apps". If an older test build is installed, uninstall it first (each build is signed with a different test key). |
+            | Always-on server | See [deploy/README.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/deploy/README.md). |
           files: |
             P2P-Chat-Windows/*
             P2P-Chat-macOS/*
             P2P-Chat-Linux/*
-          generate_release_notes: true
+            p2p-chat-android/*

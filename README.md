@@ -56,8 +56,9 @@ Or use `docker build -t p2p-chat-server .`, or `npm run server`. **Every app ins
 
 ## Download
 
-- **Windows / macOS / Linux / Android:** go to [Actions](https://github.com/shivansh2105/p2p-chat/actions), open the latest green run, and download from **Artifacts**.
-- **Releases:** pushing a `v*` tag publishes a [GitHub Release](https://github.com/shivansh2105/p2p-chat/releases).
+- **Latest release (Windows / macOS / Linux / Android):** [GitHub Releases](https://github.com/shivansh2105/p2p-chat/releases/latest). Each release lists which file is for which platform.
+- **Newest development build:** go to [Actions](https://github.com/shivansh2105/p2p-chat/actions), open the latest green run, and download from **Artifacts**.
+- **Maintainers:** bump the version in `package.json` and `mobile/package.json`, then push a `v*` tag. CI publishes the release only if every test and build passes.
 
 See [INSTALL.md](INSTALL.md) for install steps.
 
