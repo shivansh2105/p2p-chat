@@ -975,9 +975,11 @@ class P2PNode extends EventEmitter {
       }
     }
 
-    return shareable.length > 0 
-      ? [...new Set(shareable)]
-      : addrs.map(a => a.toString());
+    // Put addresses phones can use first (tunnel wss, then LAN ws); PCs accept
+    // those too, so whatever the UI shows as "the" address works for everyone
+    const rank = (a) => (a.includes('/wss') || a.includes('/tls/ws') ? 0 : a.includes('/ws') ? 1 : 2);
+    return (shareable.length > 0 ? [...new Set(shareable)] : addrs.map((a) => a.toString()))
+      .sort((a, b) => rank(a) - rank(b));
   }
 
   getConnectedPeers() {

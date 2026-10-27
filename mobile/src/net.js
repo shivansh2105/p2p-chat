@@ -128,9 +128,18 @@ export class MobileNode extends EventTarget {
     this.peerId = this.node.peerId.toString();
     // Project servers first, then PCs we've used before
     for (const a of [...SERVERS, ...this.knownAddrs]) this.dial(a).catch(() => {});
-    // …and find community PCs/servers by ourselves (no address needed)
-    this.rvTimer = setInterval(() => this.findNodes().catch(() => {}), 2 * 60 * 1000);
-    setTimeout(() => this.findNodes().catch(() => {}), 3000);
+    // …and find community PCs/servers by ourselves (no address needed).
+    // While no app peer is found yet, retry quickly (10s, 20s, 40s… ≤2 min);
+    // once connected, check every 2 min.
+    let misses = 0;
+    const loop = async () => {
+      if (this.stopped) return;
+      const have = await this.findNodes().catch(() => 0);
+      misses = have > 0 ? 0 : misses + 1;
+      if (this.stopped) return;
+      this.rvTimer = setTimeout(loop, have > 0 ? 120000 : Math.min(10000 * 2 ** (misses - 1), 120000));
+    };
+    this.rvTimer = setTimeout(loop, 3000);
     return this;
   }
 
@@ -160,11 +169,16 @@ export class MobileNode extends EventTarget {
 
   emit(type, detail) { this.dispatchEvent(new CustomEvent(type, { detail })); }
 
-  async stop() { clearInterval(this.rvTimer); await this.node?.stop(); }
+  async stop() { this.stopped = true; clearTimeout(this.rvTimer); await this.node?.stop(); }
 
   // ── connections ───────────────────────────────────────────
   async dial(addr) {
-    const ma = multiaddr(addr.trim());
+    const a = addr.trim();
+    // Phones (WebView) can't open raw TCP: they need a /ws, /wss or /tls/ws address
+    if (/\/tcp\//.test(a) && !/\/(ws|wss|tls|webrtc|webtransport|p2p-circuit)(\/|$)/.test(a)) {
+      throw new Error('That is a PC-only (TCP) address. Use one with /ws or /wss (Desktop app → + → Share shows it first).');
+    }
+    const ma = multiaddr(a);
     const conn = await this.node.dial(ma, { signal: AbortSignal.timeout(20000) });
     if (!this.knownAddrs.includes(addr)) {
       this.knownAddrs = [addr, ...this.knownAddrs].slice(0, 20);
@@ -203,6 +217,7 @@ export class MobileNode extends EventTarget {
     // identify needs a moment to learn the peer's protocols
     await new Promise((r) => setTimeout(r, 500));
     await this.exchangeKeys(peerId).catch(() => {});
+    this.emit('peers'); // protocols are known now → UI can tell app users from other nodes
     await this.fetchMail(peerId).catch(() => {});
   }
 

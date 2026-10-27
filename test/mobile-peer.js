@@ -23,7 +23,7 @@ const { P2PNode } = require('../src/main/p2p-node');
 
   const out = path.join(process.env.TMPDIR || os.tmpdir(), 'mobile-peer.json');
   const ws = n.node.getMultiaddrs().map(String).find((a) => a.startsWith('/ip4/127.0.0.1/') && a.includes('/ws/'));
-  const state = () => ({ ws, tunnel: n.tunnel?.addr || null, peerId: n.peerId, videos: n.videoStore.getSeedingVideos().map((v) => ({ id: v.id, title: v.title, ok: n.videoStore.verifyComplete(v.id) })) });
+  const state = () => ({ ws, share: n.getShareableAddresses()[0], tunnel: n.tunnel?.addr || null, peerId: n.peerId, videos: n.videoStore.getSeedingVideos().map((v) => ({ id: v.id, title: v.title, ok: n.videoStore.verifyComplete(v.id) })) });
   fs.writeFileSync(out, JSON.stringify(state()));
   setInterval(() => fs.writeFileSync(out, JSON.stringify(state())), 1000);
   console.log('WS_ADDR=' + ws);

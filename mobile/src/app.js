@@ -1,5 +1,5 @@
 // Mobile UI controller (Telegram-style). Networking lives in net.js.
-import { MobileNode } from './net.js';
+import { MobileNode, PROTO } from './net.js';
 import { idb } from './idb.js';
 
 const $ = (s) => document.querySelector(s);
@@ -22,11 +22,14 @@ function show(id) {
 
 async function saveChats() { await idb.set('chats', chats); }
 
-function renderPeers() {
-  const ps = node.peers();
-  $('#peerCount').textContent = ps.length ? `${ps.length} online` : 'Offline';
+async function renderPeers() {
+  // Only P2P Chat users/PCs — not the public DHT/bootstrap nodes we're also connected to
+  const ps = await node.appPeers(PROTO.MESSAGE).catch(() => []);
+  const any = node.peers().length > 0;
+  $('#peerCount').textContent = ps.length ? `${ps.length} online` : any ? 'Searching…' : 'Offline';
   $('#statusDot').className = `status-dot ${ps.length ? 'online' : ''}`;
-  $('#peerList').innerHTML = ps.map((p) => `<li data-peer="${esc(p)}">${esc(chats[p]?.name || short(p))}<span class="hint">chat ›</span></li>`).join('') || '<li class="hint">Not connected yet</li>';
+  $('#peerList').innerHTML = ps.map((p) => `<li data-peer="${esc(p)}">${esc(chats[p]?.name || short(p))}<span class="hint">chat ›</span></li>`).join('')
+    || `<li class="hint">${any ? 'Looking for P2P Chat users… (first time ~1 min)' : 'No internet connection yet'}</li>`;
 }
 
 function renderChats() {
@@ -114,6 +117,7 @@ async function upload() {
   renderPeers(); renderChats();
 
   node.addEventListener('peers', renderPeers);
+  setInterval(renderPeers, 10000);
   node.addEventListener('message', (e) => {
     const m = e.detail;
     chats[m.from] ||= { name: short(m.from), messages: [] };
@@ -129,7 +133,7 @@ async function upload() {
   $('#connectBtn').onclick = async () => {
     const a = $('#addrInput').value.trim();
     if (!a) return;
-    try { await node.dial(a); toast('Connected to the network'); renderPeers(); } catch (e) { toast('Could not connect: ' + e.message); }
+    try { await node.dial(a); toast('Connected'); renderPeers(); } catch (e) { toast('Could not connect: ' + e.message); }
   };
   $('#peerList').onclick = (e) => { const p = e.target.closest('li')?.dataset.peer; if (p) openChat(p); };
   $('#chatList').onclick = (e) => { const p = e.target.closest('li')?.dataset.peer; if (p) openChat(p); };
