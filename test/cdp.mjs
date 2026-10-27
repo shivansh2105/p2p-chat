@@ -1,6 +1,6 @@
 // node test/cdp.mjs "<js expression>" [shot.png]  — eval in the running Electron window + optional screenshot
 const [, , expr = '1', shot] = process.argv;
-const targets = await (await fetch('http://127.0.0.1:9333/json/list')).json();
+const targets = await (await fetch('http://127.0.0.1:' + (process.env.CDP_PORT || 9333) + '/json/list')).json();
 const page = targets.find((t) => t.type === 'page');
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 let id = 0; const pending = new Map();

@@ -1,0 +1,9 @@
+<!doctype html><meta charset="utf-8">
+<!-- Isolated test of the desktop renderer's chat list + message rendering (electron test/renderer-check.js) -->
+<div id="chatList"></div><div id="messagesContainer"></div>
+<script>
+  // Stub backend: every window.api.* call resolves to null (no real node needed)
+  const stub = () => new Proxy(function () {}, { get: () => stub(), apply: () => Promise.resolve(null) });
+  window.api = stub();
+</script>
+<script src="../src/renderer/app.js"></script>

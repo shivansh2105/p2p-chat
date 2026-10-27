@@ -154,18 +154,19 @@ function renderChatList() {
 
   chatList.innerHTML = chats.map(chat => {
     const displayName = getDisplayName(chat);
+    const unread = Number(chat.unreadCount ?? chat.unread_count ?? 0) || 0; // DB field is unreadCount
     return `
     <div class="chat-item ${currentChat?.id === chat.id ? 'active' : ''}" 
-         onclick="openChat('${chat.id}')" data-chat-id="${chat.id}">
-      <div class="chat-avatar">${getInitials(displayName)}</div>
+         onclick="openChat(this.dataset.chatId)" data-chat-id="${escapeAttr(chat.id)}">
+      <div class="chat-avatar">${escapeHtml(getInitials(displayName))}</div>
       <div class="chat-item-content">
         <div class="chat-item-header">
           <span class="chat-item-name">${escapeHtml(displayName)}</span>
           <span class="chat-item-time">${formatTime(chat.last_message_time)}</span>
         </div>
-        <div class="chat-item-preview">${chat.last_message || 'No messages yet'}</div>
+        <div class="chat-item-preview">${escapeHtml(chat.last_message || 'No messages yet')}</div>
       </div>
-      ${chat.unread_count > 0 ? `<span class="unread-badge">${chat.unread_count}</span>` : ''}
+      ${unread > 0 ? `<span class="unread-badge">${unread}</span>` : ''}
     </div>
   `;
   }).join('');
@@ -226,14 +227,17 @@ function renderMessages(msgs) {
       lastDate = msgDate;
     }
 
-    const isSent = msg.status === 'sent' || !msg.sender_id;
+    // Direction comes from the sender: messages we sent have no senderId. (Status
+    // can't be used: opening a chat marks every message 'read'. The old check read
+    // `sender_id`, which the JSON store never sets, so EVERY message showed as sent.)
+    const isSent = !(msg.senderId || msg.sender_id);
     
     html += `
       <div class="message ${isSent ? 'sent' : 'received'}">
         <div class="message-content">${escapeHtml(msg.content)}</div>
         <div class="message-time">
           ${formatMessageTime(msg.timestamp)}
-          ${isSent ? `<span class="message-status ${msg.status}"></span>` : ''}
+          ${isSent ? `<span class="message-status ${escapeAttr(msg.status)}"></span>` : ''}
         </div>
       </div>
     `;
@@ -809,6 +813,11 @@ function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+}
+
+// For attribute values: also escapes quotes (escapeHtml doesn't)
+function escapeAttr(text) {
+  return String(text ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 // Request notification permission

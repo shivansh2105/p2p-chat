@@ -1,6 +1,6 @@
 {
   "name": "p2p-chat",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Decentralized P2P chat app like Telegram with torrent-style networking",
   "main": "src/main/main.js",
   "author": "P2P Chat Community",
@@ -17,7 +17,8 @@
     "probe:tunnel": "node test/probe-tunnel.js",
     "probe:magnet": "node test/probe-magnet.mjs",
     "server": "node src/server/index.js",
-    "probe:autojoin": "node test/probe-autojoin.js"
+    "probe:autojoin": "node test/probe-autojoin.js",
+    "test:renderer": "electron test/renderer-check.js"
   },
   "build": {
     "appId": "com.p2pchat.app",
