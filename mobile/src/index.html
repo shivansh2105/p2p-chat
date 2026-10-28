@@ -21,13 +21,17 @@
       <!-- Network: connect to PCs -->
       <div id="netScreen" class="screen active">
         <div class="setup-card">
-          <h2>Network</h2>
-          <p>Automatic: the app finds other P2P Chat users and PCs by itself. The first time takes about a minute.</p>
-          <p class="hint">Optional shortcut: paste a PC's address to connect instantly (desktop app → + → Share).</p>
-          <div class="input-group">
-            <textarea id="addrInput" rows="3" placeholder="/ip4/192.168.1.5/tcp/4002/ws/p2p/12D3Koo…"></textarea>
-          </div>
-          <button class="btn primary" id="connectBtn">Connect</button>
+          <h2 id="netTitle">Connecting…</h2>
+          <p id="netDetail">Finding P2P Chat users automatically. Nothing to type.</p>
+          <button class="btn secondary" id="searchNowBtn">Search again now</button>
+          <details class="manual">
+            <summary>Advanced: connect to a specific PC</summary>
+            <p class="hint">Not needed normally. Desktop app → + → Share → copy the address.</p>
+            <div class="input-group">
+              <textarea id="addrInput" rows="3" placeholder="/dns4/….trycloudflare.com/tcp/443/wss/p2p/12D3Koo…"></textarea>
+            </div>
+            <button class="btn primary" id="connectBtn">Connect</button>
+          </details>
         </div>
         <div class="connected-peers">
           <h3>My ID</h3>

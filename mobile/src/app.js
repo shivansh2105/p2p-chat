@@ -25,11 +25,31 @@ async function saveChats() { await idb.set('chats', chats); }
 async function renderPeers() {
   // Only P2P Chat users/PCs — not the public DHT/bootstrap nodes we're also connected to
   const ps = await node.appPeers(PROTO.MESSAGE).catch(() => []);
-  const any = node.peers().length > 0;
-  $('#peerCount').textContent = ps.length ? `${ps.length} online` : any ? 'Searching…' : 'Offline';
+  const internet = node.peers().length > 0;
+  const d = node.discovery;
+  const secs = Math.max(0, Math.round((d.nextAt - Date.now()) / 1000));
+  let title, detail;
+  if (ps.length) {
+    title = `Connected · ${ps.length} online`;
+    detail = 'You are on the P2P Chat network. Tap someone below to chat.';
+  } else if (!internet) {
+    title = 'Connecting to the internet…';
+    detail = 'Waiting for a network connection.';
+  } else if (d.searching || d.searches < 3) {
+    title = 'Looking for P2P Chat users…';
+    detail = 'Automatic, nothing to type. The first time can take about a minute.';
+  } else {
+    title = 'No P2P Chat PC found yet';
+    detail = `Phones join through PCs that run P2P Chat. Open the desktop app (v1.1.1 or newer) on any PC, on any network, and this phone connects by itself. Next search in ${secs}s.`;
+  }
+  $('#netTitle').textContent = title;
+  $('#netDetail').textContent = detail;
+  $('#searchNowBtn').disabled = !!d.searching;
+  $('#searchNowBtn').textContent = d.searching ? 'Searching…' : 'Search again now';
+  $('#peerCount').textContent = ps.length ? `${ps.length} online` : internet ? 'Searching…' : 'Offline';
   $('#statusDot').className = `status-dot ${ps.length ? 'online' : ''}`;
   $('#peerList').innerHTML = ps.map((p) => `<li data-peer="${esc(p)}">${esc(chats[p]?.name || short(p))}<span class="hint">chat ›</span></li>`).join('')
-    || `<li class="hint">${any ? 'Looking for P2P Chat users… (first time ~1 min)' : 'No internet connection yet'}</li>`;
+    || '<li class="hint">Nobody yet</li>';
 }
 
 function renderChats() {
@@ -117,7 +137,8 @@ async function upload() {
   renderPeers(); renderChats();
 
   node.addEventListener('peers', renderPeers);
-  setInterval(renderPeers, 10000);
+  setInterval(renderPeers, 5000);
+  $('#searchNowBtn').onclick = () => { node.searchNow(); renderPeers(); };
   node.addEventListener('message', (e) => {
     const m = e.detail;
     chats[m.from] ||= { name: short(m.from), messages: [] };

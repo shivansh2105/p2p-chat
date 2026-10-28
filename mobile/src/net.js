@@ -134,21 +134,39 @@ export class MobileNode extends EventTarget {
     let misses = 0;
     const loop = async () => {
       if (this.stopped) return;
+      clearTimeout(this.rvTimer);
       const have = await this.findNodes().catch(() => 0);
       misses = have > 0 ? 0 : misses + 1;
+      this.discovery.misses = misses;
       if (this.stopped) return;
-      this.rvTimer = setTimeout(loop, have > 0 ? 120000 : Math.min(10000 * 2 ** (misses - 1), 120000));
+      const wait = have > 0 ? 120000 : Math.min(10000 * 2 ** (misses - 1), 120000);
+      this.discovery.nextAt = Date.now() + wait;
+      this.emit('peers');
+      this.rvTimer = setTimeout(loop, wait);
     };
+    this.searchNow = () => { if (!this.discovery.searching) loop(); };
     this.rvTimer = setTimeout(loop, 3000);
     return this;
   }
+
+  /** UI status: { searching, searches, misses, nodesSeen, nextAt } */
+  discovery = { searching: false, searches: 0, misses: 0, nodesSeen: 0, nextAt: 0 };
 
   /** Zero-config: connect to reachable app PCs (relays first) and hold a relay slot */
   async findNodes(target = 4) {
     let have = (await this.appPeers(PROTO.INBOX)).length;
     if (have >= target) return have;
+    this.discovery.searching = true; this.discovery.searches++; this.emit('peers');
+    try { return await this.#findNodes(target, have); } finally { this.discovery.searching = false; }
+  }
+
+  async #findNodes(target, have) {
+    const seen = new Set();
     for (const key of [RELAYS_KEY, NODES_KEY]) {
-      for (const p of await this.findProviders(key, 20)) {
+      const provs = await this.findProviders(key, 20);
+      provs.forEach((p) => seen.add(p.id.toString()));
+      this.discovery.nodesSeen = seen.size;
+      for (const p of provs) {
         if (have >= target) break;
         const id = p.id.toString();
         if (this.peers().includes(id)) continue;

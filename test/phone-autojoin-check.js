@@ -10,13 +10,14 @@ app.whenReady().then(async () => {
   const t0 = Date.now();
   await win.loadURL(url);
   let last = '';
-  for (let i = 0; i < 72; i++) { // up to 6 min
+  for (let i = 0; i < (+process.env.MAXTICKS || 72); i++) { // up to 6 min
     await sleep(5000);
     const s = await win.webContents.executeJavaScript(
-      `(document.querySelector('#peerCount')?.textContent || '') + ' | ' + (document.querySelector('#peerList')?.innerText || '').split(String.fromCharCode(10)).join(' ')`
+      `(document.querySelector('#peerCount')?.textContent || '') + ' | ' + (document.querySelector('#netTitle')?.textContent || '') + ' | ' + (document.querySelector('#netDetail')?.textContent || '').replace(/\\d+s\\./, 'Ns.') + ' | manual box open: ' + document.querySelector('details.manual')?.open`
     ).catch((e) => 'ERR ' + e.message);
     if (s !== last) { console.log(`${((Date.now() - t0) / 1000).toFixed(0)}s: ${s}`); last = s; }
     if (/^\d+ online/.test(s)) { console.log(`FOUND an app peer with nothing pasted after ${((Date.now() - t0) / 1000).toFixed(0)}s`); break; }
   }
+  if (process.env.SHOT) fs.writeFileSync(process.env.SHOT, (await win.webContents.capturePage()).toPNG());
   app.exit(0);
 });

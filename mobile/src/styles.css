@@ -538,3 +538,9 @@ textarea {
 .progress { padding: 0 16px; color: var(--tg-blue); font-size: 13px; min-height: 1em; }
 #videosScreen .setup-card::before { content: none; }
 #videosScreen .setup-card { max-width: none; padding: 16px; }
+
+/* Network tab: manual connect is tucked away (auto-discovery is the normal path) */
+details.manual { margin-top: 16px; text-align: left; }
+details.manual summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; }
+details.manual[open] summary { margin-bottom: 8px; }
+#searchNowBtn { margin-top: 8px; }
